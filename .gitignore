@@ -1,0 +1,8 @@
+﻿node_modules/
+out/
+.next/
+data/
+public/media/
+demo/node_modules/
+demo/out/
+*.log
