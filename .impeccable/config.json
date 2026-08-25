@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "lib/extract.ts"
+        ],
+        "createdAt": "2026-08-25T21:15:38.475Z",
+        "reason": "faux positif: regex de parsing HTML dans un scraper serveur, pas une balise img"
+      }
+    ]
+  }
+}
