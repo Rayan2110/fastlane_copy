@@ -6,6 +6,7 @@ export type ProductData = {
   description: string;
   benefits: string[];
   images: string[]; // URLs source
+  localImages?: string[]; // chemins relatifs a public/ apres telechargement
   sourceUrl: string;
   vendor?: string;
 };
