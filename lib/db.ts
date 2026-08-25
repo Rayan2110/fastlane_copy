@@ -90,6 +90,10 @@ export function listProducts(): ProductRow[] {
   return rows.map((r) => ({id: r.id, data: JSON.parse(r.data), createdAt: r.created_at}));
 }
 
+export function updateProductData(id: number, data: ProductData): void {
+  getDb().prepare('UPDATE products SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
+}
+
 export function insertScript(productId: number, script: VideoScript): number {
   const r = getDb()
     .prepare('INSERT INTO scripts (product_id, data) VALUES (?, ?)')
