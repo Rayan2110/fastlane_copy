@@ -15,6 +15,8 @@ export type Scene = {
   imageIndex: number;
   screenText: string;
   voiceText: string;
+  emphasisWords?: string[]; // mots a mettre en avant dans les captions
+  emoji?: string; // emoji accompagnant le texte ecran
 };
 
 export type VideoScript = {

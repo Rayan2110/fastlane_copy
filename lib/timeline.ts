@@ -29,6 +29,58 @@ export function assignWordsToScenes(scenes: Scene[], timings: WordTiming[]): Wor
 }
 
 export type SceneFrame = {from: number; duration: number};
+export type Shot = {from: number; duration: number; imageIndex: number; sceneIndex: number};
+
+// Decoupe chaque scene en sous-plans courts (rythme TikTok), en cyclant les
+// images du produit, et en calant les coupes sur les beats de la musique
+// quand ils sont fournis.
+export function computeShots(
+  scenes: Scene[],
+  sceneFrames: SceneFrame[],
+  imageCount: number,
+  opts: {maxShotFrames: number; minShotFrames: number; beatFrames?: number[]}
+): Shot[] {
+  const {maxShotFrames, minShotFrames, beatFrames} = opts;
+  const shots: Shot[] = [];
+
+  for (let i = 0; i < scenes.length; i++) {
+    const {from, duration} = sceneFrames[i];
+    const end = from + duration;
+    const cuts: number[] = [];
+
+    if (beatFrames && beatFrames.length > 0) {
+      // Greedy : coupe sur le dernier beat dans la fenetre [min, max].
+      let start = from;
+      while (end - start > maxShotFrames) {
+        const candidates = beatFrames.filter(
+          (b) => b > start + minShotFrames && b <= start + maxShotFrames
+        );
+        const cut = candidates.length > 0 ? candidates[candidates.length - 1] : start + maxShotFrames;
+        cuts.push(cut);
+        start = cut;
+      }
+    } else {
+      // Sans musique : decoupe en parts egales <= max.
+      const n = Math.ceil(duration / maxShotFrames);
+      for (let k = 1; k < n; k++) {
+        cuts.push(from + Math.round((duration * k) / n));
+      }
+    }
+
+    const bounds = [from, ...cuts, end];
+    for (let k = 0; k < bounds.length - 1; k++) {
+      const shotDuration = bounds[k + 1] - bounds[k];
+      if (shotDuration <= 0) continue;
+      shots.push({
+        from: bounds[k],
+        duration: shotDuration,
+        imageIndex: (scenes[i].imageIndex + k) % Math.max(1, imageCount),
+        sceneIndex: i,
+      });
+    }
+  }
+  return shots;
+}
 
 export function computeTimeline(
   scenes: Scene[],

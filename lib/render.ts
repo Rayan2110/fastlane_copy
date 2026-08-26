@@ -12,6 +12,7 @@ import {
   failRunningJobs,
 } from './db';
 import {synthesize} from './tts';
+import {detectBeats} from './beats';
 import type {Scene} from './types';
 
 const MAX_CONCURRENT = 2;
@@ -171,6 +172,17 @@ async function defaultExecutor(scriptId: number): Promise<void> {
 
   const {timings} = await synthesize(voiceText, audioBase);
 
+  const musicFile = await pickMusicFile();
+  // Coupes calees sur le rythme de la musique (music-tempo), si musique.
+  let beatFrames: number[] | undefined;
+  if (musicFile) {
+    try {
+      beatFrames = (await detectBeats(musicFile)).map((s) => Math.round(s * 30));
+    } catch {
+      beatFrames = undefined; // pas bloquant : decoupage regulier en fallback
+    }
+  }
+
   const props = {
     images,
     scenes,
@@ -179,7 +191,8 @@ async function defaultExecutor(scriptId: number): Promise<void> {
     compareAtPrice: product.data.compareAtPrice,
     brand: product.data.vendor ?? product.data.title.split(' ')[0],
     audioFile: `media/${script.productId}/voice-${scriptId}.mp3`,
-    musicFile: await pickMusicFile(),
+    musicFile,
+    beatFrames,
     styleVariant: scriptId % 2 === 0 ? 'dark' : 'light',
   };
   await fs.writeFile(propsPath, JSON.stringify(props), 'utf8');

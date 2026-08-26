@@ -6,6 +6,8 @@ const SceneSchema = z.object({
   imageIndex: z.number().int().min(0),
   screenText: z.string().min(1).max(60),
   voiceText: z.string().min(5),
+  emphasisWords: z.array(z.string()).max(6).optional(),
+  emoji: z.string().max(8).optional(),
 });
 
 const ScriptSchema = z.object({
@@ -49,11 +51,13 @@ Réponds UNIQUEMENT avec un tableau JSON:
     "angle": "nom de l'angle",
     "hook": "phrase d'accroche",
     "scenes": [
-      {"imageIndex": 0, "screenText": "texte écran", "voiceText": "texte voix off"}
+      {"imageIndex": 0, "screenText": "texte écran", "voiceText": "texte voix off", "emphasisWords": ["mots", "forts"], "emoji": "🔥"}
     ],
     "cta": "appel à l'action"
   }
-]`;
+]
+
+Pour chaque scène: "emphasisWords" = 1-3 mots du voiceText à faire ressortir visuellement (bénéfice clé, chiffre, prix), "emoji" = un emoji pertinent pour le texte écran (optionnel).`;
 }
 
 export function parseScripts(raw: string, imageCount: number): VideoScript[] {
