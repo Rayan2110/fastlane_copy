@@ -102,6 +102,18 @@ describe('computeShots', () => {
     expect(shots.find((s) => s.sceneIndex === 1)!.imageIndex).toBe(2);
   });
 
+  it('fusionne un plan de queue trop court dans la branche beats', () => {
+    // scene de 70 frames, beats qui pousseraient une coupe a 60 -> queue de 10
+    const shots = computeShots(
+      [twoScenes[0]],
+      [{from: 0, duration: 70}],
+      5,
+      {...opts, beatFrames: [0, 30, 60, 90]}
+    );
+    expect(shots).toHaveLength(1);
+    expect(shots[0].duration).toBe(70);
+  });
+
   it('snap les coupes sur les beats quand ils sont fournis', () => {
     const beatFrames = [0, 38, 76, 114, 152, 190];
     const shots = computeShots(

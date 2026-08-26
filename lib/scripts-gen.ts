@@ -94,15 +94,39 @@ async function generateBatch(product: ProductData, count: number): Promise<Video
 }
 
 const BATCH_SIZE = 5; // au-dela, la reponse JSON risque la troncature
+const BATCH_CONCURRENCY = 2; // appels claude CLI simultanes max
+
+export type GenerateResult = {scripts: VideoScript[]; failedBatches: number};
 
 export async function generateScripts(
   product: ProductData,
   count: number
-): Promise<VideoScript[]> {
+): Promise<GenerateResult> {
   const batches: number[] = [];
   for (let rest = count; rest > 0; rest -= BATCH_SIZE) {
     batches.push(Math.min(BATCH_SIZE, rest));
   }
-  const results = await Promise.all(batches.map((n) => generateBatch(product, n)));
-  return results.flat().slice(0, count);
+
+  // Petite pool : un batch en echec ne jette pas les autres.
+  const scripts: VideoScript[] = [];
+  let failedBatches = 0;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < batches.length) {
+      const n = batches[cursor++];
+      try {
+        scripts.push(...(await generateBatch(product, n)));
+      } catch {
+        failedBatches++;
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({length: Math.min(BATCH_CONCURRENCY, batches.length)}, worker)
+  );
+
+  if (scripts.length === 0) {
+    throw new Error('La génération de scripts a échoué (tous les batchs en erreur)');
+  }
+  return {scripts: scripts.slice(0, count), failedBatches};
 }

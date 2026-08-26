@@ -15,7 +15,11 @@ import {loadFont} from '@remotion/google-fonts/ArchivoBlack';
 import {Animated, Scale, Fade} from 'remotion-animated';
 import type {Scene, WordTiming} from '../lib/types';
 import {computeTimeline, computeShots} from '../lib/timeline';
-import {STYLE, THEMES, EMPHASIS_PATTERN, type StyleVariant} from './style';
+import {STYLE, THEMES, EMPHASIS_PATTERN, EMPHASIS_KEYWORDS, type StyleVariant} from './style';
+
+// Meme nettoyage partout : Set d'emphase et mots TTS doivent se comparer
+// sous la meme forme (apostrophes et ponctuation retirees, minuscules).
+const cleanWord = (w: string) => w.replace(/[.,!?;:«»"'’()]/g, '').toLowerCase();
 import {WhiteFlash, Vignette, useCameraShake, useHookPunch} from './fx';
 
 const {fontFamily: archivoBlack} = loadFont();
@@ -88,8 +92,8 @@ const Karaoke: React.FC<{timings: WordTiming[]; emphasis: Set<string>; textColor
   const group = timings.slice(groupStart, groupStart + STYLE.wordsPerGroup);
 
   const isEmphasis = (word: string) => {
-    const clean = word.replace(/[.,!?;:«»"']/g, '').toLowerCase();
-    return emphasis.has(clean) || EMPHASIS_PATTERN.test(word);
+    const clean = cleanWord(word);
+    return emphasis.has(clean) || EMPHASIS_PATTERN.test(word) || EMPHASIS_KEYWORDS.test(clean);
   };
 
   return (
@@ -176,8 +180,17 @@ const ScreenText: React.FC<{text: string; emoji?: string; big?: boolean}> = ({te
 
 // ---------- Prix, urgence, CTA ----------
 
+// Gere les formats europeens avec separateur de milliers : "1.299,00 €",
+// "1 299,00 €", "39,90 €", "39.90". Le dernier . ou , n'est une decimale
+// que s'il est suivi de 1-2 chiffres.
 function parsePrice(p: string): number {
-  const n = Number(p.replace(/[^\d,.]/g, '').replace(',', '.'));
+  const digits = p.replace(/[^\d,.]/g, '');
+  const lastSep = Math.max(digits.lastIndexOf(','), digits.lastIndexOf('.'));
+  const decimals = lastSep >= 0 ? digits.length - lastSep - 1 : 0;
+  const isDecimal = lastSep >= 0 && decimals >= 1 && decimals <= 2;
+  const intPart = (isDecimal ? digits.slice(0, lastSep) : digits).replace(/[^\d]/g, '');
+  const decPart = isDecimal ? digits.slice(lastSep + 1) : '';
+  const n = Number(decPart ? `${intPart}.${decPart}` : intPart);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -194,10 +207,12 @@ const PriceBlock: React.FC<{price: string; compareAtPrice?: string; cta?: string
     extrapolateRight: 'clamp',
     easing: Easing.out(Easing.quad),
   });
-  const discount =
+  const rawDiscount =
     compareAtPrice && parsePrice(compareAtPrice) > 0
       ? Math.round((1 - parsePrice(price) / parsePrice(compareAtPrice)) * 100)
       : 0;
+  // Garde-fou : un badge "-100%" ou negatif serait pire que pas de badge.
+  const discount = rawDiscount > 0 && rawDiscount < 95 ? rawDiscount : 0;
   const discountIn = spring({frame: frame - 16, fps, config: {damping: 9, stiffness: 220}});
   const pulse = 1 + 0.03 * Math.sin(frame * STYLE.ctaPulseSpeed * Math.PI);
 
@@ -340,7 +355,7 @@ export const Slideshow: React.FC<SlideshowProps> = ({
   const emphasis = useMemo(() => {
     const set = new Set<string>();
     for (const s of scenes) {
-      for (const w of s.emphasisWords ?? []) set.add(w.toLowerCase());
+      for (const w of s.emphasisWords ?? []) set.add(cleanWord(w));
     }
     return set;
   }, [scenes]);
@@ -361,18 +376,27 @@ export const Slideshow: React.FC<SlideshowProps> = ({
 
   return (
     <AbsoluteFill style={{backgroundColor: theme.bg}}>
-      <Audio src={staticFile(audioFile)} />
-      {musicFile ? <Audio src={staticFile(musicFile)} volume={musicVolume} loop /> : null}
+      {audioFile ? <Audio src={staticFile(audioFile)} /> : null}
+      {musicFile ? (
+        <Audio
+          src={staticFile(musicFile)}
+          volume={musicVolume}
+          loop
+          loopVolumeCurveBehavior="extend"
+        />
+      ) : null}
 
       {/* Couche images : plans courts, punch-in global d'ouverture */}
       <AbsoluteFill style={{transform: `scale(${punch})`}}>
         {shots.map((shot, i) => {
           // Le dernier plan tient jusqu'au bout du padding final.
           const extend = i === shots.length - 1 ? fps : 0;
+          const src = images[shot.imageIndex] ?? images[0];
+          if (!src) return null; // aucune image (preview Studio) : fond nu
           return (
             <Sequence key={`shot-${i}`} from={shot.from} durationInFrames={shot.duration + extend}>
               <ShotImage
-                src={images[shot.imageIndex] ?? images[0]}
+                src={src}
                 duration={shot.duration + extend}
                 zoomIn={i % 2 === 0}
                 seed={i}

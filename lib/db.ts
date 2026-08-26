@@ -110,6 +110,15 @@ export function claimNextPendingJob(): {id: number; scriptId: number} | undefine
   return row && {id: row.id, scriptId: row.script_id};
 }
 
+// Un script a-t-il deja un rendu en attente ou en cours ?
+export function hasActiveJobForScript(scriptId: number): boolean {
+  return (
+    getDb()
+      .prepare(`SELECT 1 FROM jobs WHERE script_id = ? AND status IN ('pending','running') LIMIT 1`)
+      .get(scriptId) !== undefined
+  );
+}
+
 // Apres un redemarrage du serveur, les jobs 'running' sont orphelins.
 export function failRunningJobs(reason: string): number {
   const r = getDb()

@@ -19,7 +19,7 @@ const MAX_CONCURRENT = 2;
 const RENDER_TIMEOUT_MS = 20 * 60_000;
 const RENDER_CONCURRENCY = Math.max(4, Math.floor(os.cpus().length / 2));
 
-type Executor = (scriptId: number) => Promise<void>;
+type Executor = (scriptId: number, jobId: number) => Promise<void>;
 
 // L'etat vit sur globalThis : en `next dev`, chaque recompilation recree le
 // module, mais les rendus en cours et la limite de concurrence doivent
@@ -33,6 +33,11 @@ function state(): QueueState {
   }
   return g.__fastlaneQueue;
 }
+
+// En `next dev`, l'etat survit au HMR mais l'executor capture du code perime :
+// on le rafraichit a chaque (re)chargement du module. Les tests appellent
+// setExecutor apres import, donc rien ne change pour eux.
+state().executor = defaultExecutor;
 
 // Injection pour les tests de file.
 export function setExecutor(fn: Executor): void {
@@ -56,15 +61,38 @@ export function enqueueRender(scriptId: number): number {
   return jobId;
 }
 
+function safeSetStatus(jobId: number, status: 'done' | 'failed', error?: string): void {
+  try {
+    setJobStatus(jobId, status, error);
+  } catch {
+    // DB indisponible (contention multi-process) : ne pas faire tomber la pompe
+  }
+}
+
 function pump(): void {
   const s = state();
   while (s.running < MAX_CONCURRENT) {
-    const claim = claimNextPendingJob();
+    let claim: ReturnType<typeof claimNextPendingJob>;
+    try {
+      claim = claimNextPendingJob();
+    } catch {
+      break;
+    }
     if (!claim) break;
+    const {id: jobId, scriptId} = claim;
     s.running++;
-    s.executor(claim.scriptId)
-      .then(() => setJobStatus(claim.id, 'done'))
-      .catch((err: Error) => setJobStatus(claim.id, 'failed', err.message?.slice(0, 1000)))
+    let job: Promise<void>;
+    try {
+      job = Promise.resolve(s.executor(scriptId, jobId));
+    } catch (err) {
+      // executor qui leve en synchrone : ne pas fuiter le compteur
+      safeSetStatus(jobId, 'failed', (err as Error).message?.slice(0, 1000));
+      s.running--;
+      continue;
+    }
+    job
+      .then(() => safeSetStatus(jobId, 'done'))
+      .catch((err: Error) => safeSetStatus(jobId, 'failed', err.message?.slice(0, 1000)))
       .finally(() => {
         s.running--;
         pump();
@@ -87,7 +115,7 @@ function killTree(pid: number | undefined): void {
   if (!pid) return;
   if (process.platform === 'win32') {
     // child.kill() ne tue que cmd.exe, pas l'arbre en dessous (node/chrome).
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {windowsHide: true});
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {windowsHide: true}).on('error', () => {});
   } else {
     try {
       process.kill(pid, 'SIGKILL');
@@ -144,7 +172,7 @@ function runRemotionRender(propsPath: string, outAbs: string): Promise<void> {
   });
 }
 
-async function defaultExecutor(scriptId: number): Promise<void> {
+async function defaultExecutor(scriptId: number, jobId: number): Promise<void> {
   const script = getScript(scriptId);
   if (!script) throw new Error(`Script ${scriptId} introuvable`);
   const product = getProduct(script.productId);
@@ -165,9 +193,12 @@ async function defaultExecutor(scriptId: number): Promise<void> {
   );
   const voiceText = scenes.map((s) => s.voiceText).join(' ');
 
-  const audioBase = path.join(mediaDir, `voice-${scriptId}`);
-  const propsPath = path.join(mediaDir, `props-${scriptId}.json`);
-  const outRel = `media/${script.productId}/video-${scriptId}.mp4`;
+  // Artefacts keyes par jobId : un retry concurrent ou un process orphelin
+  // n'ecrit jamais dans les fichiers d'un autre rendu.
+  const base = `${scriptId}-j${jobId}`;
+  const audioBase = path.join(mediaDir, `voice-${base}`);
+  const propsPath = path.join(mediaDir, `props-${base}.json`);
+  const outRel = `media/${script.productId}/video-${base}.mp4`;
   const outAbs = path.join(process.cwd(), 'public', outRel);
 
   const {timings} = await synthesize(voiceText, audioBase);
@@ -190,7 +221,7 @@ async function defaultExecutor(scriptId: number): Promise<void> {
     price: product.data.price,
     compareAtPrice: product.data.compareAtPrice,
     brand: product.data.vendor ?? product.data.title.split(' ')[0],
-    audioFile: `media/${script.productId}/voice-${scriptId}.mp3`,
+    audioFile: `media/${script.productId}/voice-${base}.mp3`,
     musicFile,
     beatFrames,
     styleVariant: scriptId % 2 === 0 ? 'dark' : 'light',

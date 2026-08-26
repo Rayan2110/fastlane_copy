@@ -136,9 +136,21 @@ export function ProductView({productId}: {productId: number}) {
     }
   };
 
+  const [retryingIds, setRetryingIds] = useState<Set<number>>(new Set());
+
   const retryJob = async (jobId: number) => {
-    await fetch(`/api/jobs/${jobId}/retry`, {method: 'POST'});
-    await refresh();
+    if (retryingIds.has(jobId)) return;
+    setRetryingIds((prev) => new Set(prev).add(jobId));
+    try {
+      await fetch(`/api/jobs/${jobId}/retry`, {method: 'POST'});
+      await refresh();
+    } finally {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
+    }
   };
 
   const togglePosted = async (video: VideoRow) => {
@@ -197,9 +209,10 @@ export function ProductView({productId}: {productId: number}) {
                         <button
                           className="ghost"
                           style={{padding: '4px 10px', fontSize: 12}}
+                          disabled={retryingIds.has(j.id)}
                           onClick={() => retryJob(j.id)}
                         >
-                          Relancer
+                          {retryingIds.has(j.id) ? '…' : 'Relancer'}
                         </button>
                       ) : null}
                     </span>

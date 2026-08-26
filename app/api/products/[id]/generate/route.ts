@@ -20,10 +20,17 @@ export async function POST(req: Request, {params}: {params: {id: string}}) {
     // body vide -> defaut
   }
   try {
-    const scripts = await generateScripts(product.data, count);
+    const {scripts, failedBatches} = await generateScripts(product.data, count);
     const scriptIds = scripts.map((s) => insertScript(id, s));
     const jobIds = scriptIds.map((sid) => enqueueRender(sid));
-    return NextResponse.json({scriptIds, jobIds});
+    return NextResponse.json({
+      scriptIds,
+      jobIds,
+      warning:
+        failedBatches > 0
+          ? `${failedBatches} lot(s) de scripts ont échoué — ${scripts.length} scripts générés quand même`
+          : undefined,
+    });
   } catch (err) {
     return NextResponse.json({error: (err as Error).message}, {status: 500});
   }

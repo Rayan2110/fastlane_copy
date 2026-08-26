@@ -59,6 +59,11 @@ export function computeShots(
         cuts.push(cut);
         start = cut;
       }
+      // Pas de plan de queue d'1-2 frames : on fusionne avec le precedent
+      // (quitte a depasser legerement max, preferable a un blip).
+      while (cuts.length > 0 && end - cuts[cuts.length - 1] < minShotFrames) {
+        cuts.pop();
+      }
     } else {
       // Sans musique : decoupe en parts egales <= max.
       const n = Math.ceil(duration / maxShotFrames);

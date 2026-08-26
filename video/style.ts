@@ -67,6 +67,9 @@ export const THEMES: Record<StyleVariant, {bg: string; gradient: string; text: s
   },
 };
 
-// Mots consideres "forts" meme si le script ne les liste pas :
-// chiffres, prix, et vocabulaire d'urgence/promo.
-export const EMPHASIS_PATTERN = /\d|€|%|gratuit|promo|offre|stock|aujourd|maintenant|vite|moitié|moins/i;
+// Mots consideres "forts" meme si le script ne les liste pas.
+// EMPHASIS_PATTERN : en sous-chaine (chiffres, prix, pourcentages).
+// EMPHASIS_KEYWORDS : sur le mot entier nettoye (sinon « évite » matche « vite »).
+export const EMPHASIS_PATTERN = /\d|€|\$|%/;
+export const EMPHASIS_KEYWORDS =
+  /^(gratuit(e|s|es)?|promo(s)?|offre(s)?|stock|aujourd\S*|maintenant|vite|moitié|moins|jamais|secret|résultat(s)?)$/i;
