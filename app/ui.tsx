@@ -166,6 +166,13 @@ export function ProductView({productId}: {productId: number}) {
 
   const {product, scripts, videos, jobs} = data;
   const scriptById = new Map(scripts.map((s) => [s.id, s]));
+  // Un seul statut par script : le job le plus recent (les vieilles lignes
+  // "echec" deja relancees n'ont plus d'interet).
+  const latestByScript = new Map<number, JobRow>();
+  for (const j of [...jobs].sort((a, b) => a.id - b.id)) {
+    latestByScript.set(j.scriptId, j);
+  }
+  const visibleJobs = [...latestByScript.values()].sort((a, b) => b.id - a.id);
 
   return (
     <>
@@ -195,7 +202,7 @@ export function ProductView({productId}: {productId: number}) {
         <section>
           <h2>Rendus</h2>
           <div className="card">
-            {jobs.map((j) => {
+            {visibleJobs.map((j) => {
               const script = scriptById.get(j.scriptId);
               return (
                 <div key={j.id} style={{padding: '6px 0'}}>
