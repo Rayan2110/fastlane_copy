@@ -60,6 +60,11 @@ describe('parseShopifyProduct', () => {
     }
   });
 
+  it('exclut les titres de section du body_html', () => {
+    expect(p.benefits).not.toContain("Ce qu'il fait");
+    expect(p.benefits).not.toContain("Ce qu'il ne fait pas");
+  });
+
   it('description = texte brut sans HTML', () => {
     expect(p.description).not.toContain('<p>');
     expect(p.description).toContain('vibration au poignet');

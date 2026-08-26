@@ -52,14 +52,21 @@ export function parseShopifyProduct(json: unknown, sourceUrl: string): ProductDa
   const {product} = json as ShopifyProductJson;
   const variant = product.variants[0];
   const currency = variant?.price_currency ?? 'EUR';
-  const text = stripHtml(product.body_html ?? '');
+  const body = product.body_html ?? '';
+  const text = stripHtml(body);
   const lines = text.split('\n').map((l) => l.trim());
+
+  // Les titres de section (<h1>-<h6>) ne sont pas des benefices.
+  const headings = new Set(
+    [...body.matchAll(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi)].map((m) => stripHtml(m[1]))
+  );
 
   const benefits = lines
     .filter(
       (l) =>
         l.length >= 10 &&
         l.length <= 90 &&
+        !headings.has(l) &&
         !l.startsWith('[') &&
         !l.includes('À CONFIRMER') &&
         !l.endsWith(':')
