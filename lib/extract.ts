@@ -152,20 +152,25 @@ export async function extractProduct(url: string): Promise<ProductData> {
   const html = await res.text();
   const pageText = stripHtml(html).slice(0, 15_000);
   const raw = await runClaude(GENERIC_EXTRACT_PROMPT(url, pageText));
-  const data = extractJson<Omit<ProductData, 'images' | 'sourceUrl'> & {
-    compareAtPrice: string | null;
-    vendor: string | null;
-  }>(raw);
+  const data = extractJson<Record<string, unknown>>(raw);
+
+  // Le LLM peut renvoyer null sur n'importe quel champ (page d'accueil,
+  // page non-produit…) : on normalise TOUT, jamais de null en base.
+  const asString = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const title = asString(data.title) || new URL(url).hostname.replace(/^www\./, '');
+  const compareAt = asString(data.compareAtPrice);
 
   return {
-    title: data.title,
-    price: data.price,
-    compareAtPrice: data.compareAtPrice ?? undefined,
-    currency: data.currency ?? 'EUR',
-    description: data.description ?? '',
-    benefits: Array.isArray(data.benefits) ? data.benefits.slice(0, 6) : [],
+    title,
+    price: asString(data.price),
+    compareAtPrice: compareAt || undefined,
+    currency: asString(data.currency) || 'EUR',
+    description: asString(data.description),
+    benefits: Array.isArray(data.benefits)
+      ? data.benefits.filter((b): b is string => typeof b === 'string').slice(0, 6)
+      : [],
     images: extractImageUrls(html, url),
     sourceUrl: url,
-    vendor: data.vendor ?? undefined,
+    vendor: asString(data.vendor) || undefined,
   };
 }

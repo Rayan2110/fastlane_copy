@@ -182,8 +182,9 @@ const ScreenText: React.FC<{text: string; emoji?: string; big?: boolean}> = ({te
 
 // Gere les formats europeens avec separateur de milliers : "1.299,00 €",
 // "1 299,00 €", "39,90 €", "39.90". Le dernier . ou , n'est une decimale
-// que s'il est suivi de 1-2 chiffres.
-function parsePrice(p: string): number {
+// que s'il est suivi de 1-2 chiffres. Tolere null/undefined (produit sans prix).
+function parsePrice(p: string | null | undefined): number {
+  if (!p) return 0;
   const digits = p.replace(/[^\d,.]/g, '');
   const lastSep = Math.max(digits.lastIndexOf(','), digits.lastIndexOf('.'));
   const decimals = lastSep >= 0 ? digits.length - lastSep - 1 : 0;
@@ -200,6 +201,8 @@ const PriceBlock: React.FC<{price: string; compareAtPrice?: string; cta?: string
 }) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
+  // Produit sans prix (page non-produit, extraction incomplete) : pas de badge.
+  if (!price || !price.trim()) return null;
   const badgeIn = spring({frame: frame - 4, fps, config: {damping: 11}});
   // La barre rouge se dessine sur l'ancien prix.
   const strike = interpolate(frame, [10, 20], [0, 1], {
