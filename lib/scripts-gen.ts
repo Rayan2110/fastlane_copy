@@ -28,7 +28,7 @@ export function buildScriptsPrompt(product: ProductData, count: number): string 
 
 PRODUIT:
 - Titre: ${product.title}
-- Prix: ${product.price}${product.compareAtPrice ? ` (au lieu de ${product.compareAtPrice})` : ''}
+- Prix: ${product.price ? `${product.price}${product.compareAtPrice ? ` (au lieu de ${product.compareAtPrice})` : ''}` : 'non affiché — NE PAS inventer de prix, ne pas en parler'}
 - Description: ${product.description}
 - Bénéfices: ${product.benefits.join(' | ')}
 - Images disponibles (index): ${imageList}
@@ -42,7 +42,7 @@ RÈGLES STRICTES:
 - "screenText" par scène: maximum 6 mots, percutant.
 - "imageIndex": un entier entre 0 et ${product.images.length - 1}, varie les images entre les scènes.
 - Le hook (première scène) doit arrêter le scroll en 2 secondes.
-- Dernière scène: mentionne le prix${product.compareAtPrice ? ' et la promo' : ''}.
+${product.price ? `- Dernière scène: mentionne le prix${product.compareAtPrice ? ' et la promo' : ''}.` : '- Dernière scène: pousse vers le lien en bio, sans mentionner de prix.'}
 - "cta": phrase courte finissant par "lien en bio".
 
 Réponds UNIQUEMENT avec un tableau JSON:
