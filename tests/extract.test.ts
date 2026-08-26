@@ -24,6 +24,11 @@ describe('toShopifyJsonUrl', () => {
       'https://x.com/collections/all/products/p1.json'
     );
   });
+  it('ne double pas le .json si deja present', () => {
+    expect(toShopifyJsonUrl('https://x.com/products/mon-produit.json')).toBe(
+      'https://x.com/products/mon-produit.json'
+    );
+  });
   it('retourne null pour une URL non-produit', () => {
     expect(toShopifyJsonUrl('https://x.com/pages/contact')).toBeNull();
     expect(toShopifyJsonUrl('pas une url')).toBeNull();

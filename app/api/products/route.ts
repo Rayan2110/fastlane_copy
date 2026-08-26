@@ -1,7 +1,7 @@
 import {NextResponse} from 'next/server';
 import {extractProduct} from '@/lib/extract';
 import {downloadImages} from '@/lib/media';
-import {insertProduct, listProducts, updateProductData} from '@/lib/db';
+import {insertProduct, listProducts, updateProductData, deleteProduct} from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,13 +20,16 @@ export async function POST(req: Request) {
   if (!url) {
     return NextResponse.json({error: 'URL manquante'}, {status: 400});
   }
+  let id: number | undefined;
   try {
     const product = await extractProduct(url);
-    const id = insertProduct(product);
-    const localImages = await downloadImages(product.images, id);
-    updateProductData(id, {...product, localImages});
+    id = insertProduct(product);
+    const {sourceUrls, localImages} = await downloadImages(product.images, id);
+    // images et localImages restent alignes : les scripts indexent dedans.
+    updateProductData(id, {...product, images: sourceUrls, localImages});
     return NextResponse.json({id});
   } catch (err) {
+    if (id !== undefined) deleteProduct(id); // pas de carte morte dans le dashboard
     return NextResponse.json({error: (err as Error).message}, {status: 422});
   }
 }

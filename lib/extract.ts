@@ -17,7 +17,7 @@ export function toShopifyJsonUrl(url: string): string | null {
   } catch {
     return null;
   }
-  const m = parsed.pathname.match(/^(.*\/products\/[^/]+?)\/?$/);
+  const m = parsed.pathname.match(/^(.*\/products\/[^/]+?)(?:\.json)?\/?$/);
   if (!m) return null;
   return `${parsed.origin}${m[1]}.json`;
 }
@@ -50,7 +50,7 @@ type ShopifyProductJson = {
 
 export function parseShopifyProduct(json: unknown, sourceUrl: string): ProductData {
   const {product} = json as ShopifyProductJson;
-  const variant = product.variants[0];
+  const variant = (product.variants ?? [])[0];
   const currency = variant?.price_currency ?? 'EUR';
   const body = product.body_html ?? '';
   const text = stripHtml(body);
@@ -85,7 +85,7 @@ export function parseShopifyProduct(json: unknown, sourceUrl: string): ProductDa
     currency,
     description: text.slice(0, 1000),
     benefits,
-    images: product.images.map((i) => i.src),
+    images: (product.images ?? []).map((i) => i.src),
     sourceUrl,
     vendor: product.vendor,
   };

@@ -13,6 +13,9 @@ import {
   getJob,
   setJobStatus,
   listJobs,
+  deleteProduct,
+  claimNextPendingJob,
+  failRunningJobs,
 } from '../lib/db';
 import {sampleProduct, sampleScript} from './fixtures/sample';
 
@@ -49,6 +52,34 @@ describe('db', () => {
     expect(listVideos(pid)[0].posted).toBe(false);
     setVideoPosted(vid, true);
     expect(listVideos(pid)[0].posted).toBe(true);
+  });
+
+  it('supprime un produit', () => {
+    const id = insertProduct(sampleProduct);
+    deleteProduct(id);
+    expect(getProduct(id)).toBeUndefined();
+  });
+
+  it('claimNextPendingJob reclame les jobs dans l ordre et les passe running', () => {
+    const pid = insertProduct(sampleProduct);
+    const sid = insertScript(pid, sampleScript);
+    const j1 = createJob(sid);
+    const j2 = createJob(sid);
+    expect(claimNextPendingJob()).toEqual({id: j1, scriptId: sid});
+    expect(getJob(j1)!.status).toBe('running');
+    expect(claimNextPendingJob()).toEqual({id: j2, scriptId: sid});
+    expect(claimNextPendingJob()).toBeUndefined();
+  });
+
+  it('failRunningJobs requalifie les jobs orphelins', () => {
+    const pid = insertProduct(sampleProduct);
+    const sid = insertScript(pid, sampleScript);
+    const j1 = createJob(sid);
+    claimNextPendingJob();
+    const n = failRunningJobs('interrompu');
+    expect(n).toBe(1);
+    expect(getJob(j1)!.status).toBe('failed');
+    expect(getJob(j1)!.error).toBe('interrompu');
   });
 
   it('cycle de vie job', () => {

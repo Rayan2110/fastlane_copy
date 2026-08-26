@@ -76,10 +76,7 @@ export function parseScripts(raw: string, imageCount: number): VideoScript[] {
   return valid;
 }
 
-export async function generateScripts(
-  product: ProductData,
-  count: number
-): Promise<VideoScript[]> {
+async function generateBatch(product: ProductData, count: number): Promise<VideoScript[]> {
   const prompt = buildScriptsPrompt(product, count);
   const raw = await runClaude(prompt);
   try {
@@ -90,4 +87,18 @@ export async function generateScripts(
     );
     return parseScripts(retryRaw, product.images.length);
   }
+}
+
+const BATCH_SIZE = 5; // au-dela, la reponse JSON risque la troncature
+
+export async function generateScripts(
+  product: ProductData,
+  count: number
+): Promise<VideoScript[]> {
+  const batches: number[] = [];
+  for (let rest = count; rest > 0; rest -= BATCH_SIZE) {
+    batches.push(Math.min(BATCH_SIZE, rest));
+  }
+  const results = await Promise.all(batches.map((n) => generateBatch(product, n)));
+  return results.flat().slice(0, count);
 }

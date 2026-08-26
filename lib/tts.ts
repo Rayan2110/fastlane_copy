@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import type {WordTiming} from './types';
 
 export const DEFAULT_VOICE = 'fr-FR-VivienneMultilingualNeural';
+const TTS_TIMEOUT_MS = 180_000;
 
 // Genere <outBase>.mp3 + <outBase>.words.json via scripts/tts.py et
 // retourne le chemin audio et les timings mot par mot.
@@ -18,11 +19,26 @@ export function synthesize(
       {shell: false, windowsHide: true, cwd: process.cwd()}
     );
     let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      reject(new Error(`edge-tts: timeout après ${TTS_TIMEOUT_MS / 1000}s (service Microsoft injoignable ?)`));
+    }, TTS_TIMEOUT_MS);
+
+    child.stdout.on('data', () => {}); // drain
     child.stderr.on('data', (d) => (stderr += d));
-    child.on('error', () =>
-      reject(new Error('python introuvable — requis pour la voix off (edge-tts)'))
-    );
+    child.on('error', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error('python introuvable — requis pour la voix off (edge-tts)'));
+    });
     child.on('close', async (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (code !== 0) {
         reject(new Error(`edge-tts a échoué: ${stderr.slice(0, 500)}`));
         return;
