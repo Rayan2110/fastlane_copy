@@ -136,6 +136,23 @@ export function ProductView({productId}: {productId: number}) {
     }
   };
 
+  const [retryingIds, setRetryingIds] = useState<Set<number>>(new Set());
+
+  const retryJob = async (jobId: number) => {
+    if (retryingIds.has(jobId)) return;
+    setRetryingIds((prev) => new Set(prev).add(jobId));
+    try {
+      await fetch(`/api/jobs/${jobId}/retry`, {method: 'POST'});
+      await refresh();
+    } finally {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
+    }
+  };
+
   const togglePosted = async (video: VideoRow) => {
     await fetch(`/api/videos/${video.id}/posted`, {
       method: 'POST',
@@ -181,13 +198,28 @@ export function ProductView({productId}: {productId: number}) {
             {jobs.map((j) => {
               const script = scriptById.get(j.scriptId);
               return (
-                <div key={j.id} className="row" style={{padding: '6px 0', justifyContent: 'space-between'}}>
-                  <span style={{color: 'var(--muted)', fontSize: 14}}>
-                    {script ? `${script.data.angle} — « ${script.data.hook} »` : `Script ${j.scriptId}`}
-                  </span>
-                  <span className={`badge ${j.status}`} title={j.error ?? undefined}>
-                    {STATUS_LABEL[j.status]}
-                  </span>
+                <div key={j.id} style={{padding: '6px 0'}}>
+                  <div className="row" style={{justifyContent: 'space-between'}}>
+                    <span style={{color: 'var(--muted)', fontSize: 14}}>
+                      {script ? `${script.data.angle} — « ${script.data.hook} »` : `Script ${j.scriptId}`}
+                    </span>
+                    <span className="row" style={{gap: 8}}>
+                      <span className={`badge ${j.status}`}>{STATUS_LABEL[j.status]}</span>
+                      {j.status === 'failed' ? (
+                        <button
+                          className="ghost"
+                          style={{padding: '4px 10px', fontSize: 12}}
+                          disabled={retryingIds.has(j.id)}
+                          onClick={() => retryJob(j.id)}
+                        >
+                          {retryingIds.has(j.id) ? '…' : 'Relancer'}
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                  {j.status === 'failed' && j.error ? (
+                    <div className="error-box" style={{marginTop: 6, fontSize: 13}}>{j.error}</div>
+                  ) : null}
                 </div>
               );
             })}

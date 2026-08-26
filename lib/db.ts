@@ -94,6 +94,39 @@ export function updateProductData(id: number, data: ProductData): void {
   getDb().prepare('UPDATE products SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
 }
 
+export function deleteProduct(id: number): void {
+  getDb().prepare('DELETE FROM products WHERE id = ?').run(id);
+}
+
+// Reclame atomiquement le prochain job en attente (passe en 'running').
+export function claimNextPendingJob(): {id: number; scriptId: number} | undefined {
+  const row = getDb()
+    .prepare(
+      `UPDATE jobs SET status = 'running'
+       WHERE id = (SELECT id FROM jobs WHERE status = 'pending' ORDER BY id LIMIT 1)
+       RETURNING id, script_id`
+    )
+    .get() as {id: number; script_id: number} | undefined;
+  return row && {id: row.id, scriptId: row.script_id};
+}
+
+// Un script a-t-il deja un rendu en attente ou en cours ?
+export function hasActiveJobForScript(scriptId: number): boolean {
+  return (
+    getDb()
+      .prepare(`SELECT 1 FROM jobs WHERE script_id = ? AND status IN ('pending','running') LIMIT 1`)
+      .get(scriptId) !== undefined
+  );
+}
+
+// Apres un redemarrage du serveur, les jobs 'running' sont orphelins.
+export function failRunningJobs(reason: string): number {
+  const r = getDb()
+    .prepare(`UPDATE jobs SET status = 'failed', error = ? WHERE status = 'running'`)
+    .run(reason);
+  return r.changes;
+}
+
 export function insertScript(productId: number, script: VideoScript): number {
   const r = getDb()
     .prepare('INSERT INTO scripts (product_id, data) VALUES (?, ?)')

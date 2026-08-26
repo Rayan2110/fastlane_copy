@@ -1,6 +1,10 @@
 // Test d'integration MANUEL du pipeline aval (TTS -> timeline -> rendu -> DB),
 // sans Claude. Ne fait pas partie de `npm test` (dossier scripts/, pas tests/).
 // Usage: npx vitest run scripts/e2e-pipeline.manual.ts --testTimeout=600000
+//
+// ATTENTION: ne pas lancer pendant qu'un rendu tourne dans `next dev` — la
+// recuperation d'orphelins de ce process marquerait 'failed' les jobs
+// 'running' du serveur (DB partagee, recovery par process).
 import {it, expect} from 'vitest';
 import {openDb, getProduct, insertScript, getJob, listVideos} from '../lib/db';
 import {enqueueRender} from '../lib/render';

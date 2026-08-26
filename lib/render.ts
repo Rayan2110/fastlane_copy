@@ -2,41 +2,99 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {createJob, setJobStatus, getScript, getProduct, insertVideo} from './db';
+import {
+  createJob,
+  setJobStatus,
+  getScript,
+  getProduct,
+  insertVideo,
+  claimNextPendingJob,
+  failRunningJobs,
+} from './db';
 import {synthesize} from './tts';
+import {detectBeats} from './beats';
+import type {Scene} from './types';
 
 const MAX_CONCURRENT = 2;
+const RENDER_TIMEOUT_MS = 20 * 60_000;
 const RENDER_CONCURRENCY = Math.max(4, Math.floor(os.cpus().length / 2));
 
-type Executor = (scriptId: number) => Promise<void>;
+type Executor = (scriptId: number, jobId: number) => Promise<void>;
 
-let executor: Executor = defaultExecutor;
+// L'etat vit sur globalThis : en `next dev`, chaque recompilation recree le
+// module, mais les rendus en cours et la limite de concurrence doivent
+// survivre. La DB reste la source de verite pour la file (jobs 'pending').
+type QueueState = {running: number; recovered: boolean; executor: Executor};
+const g = globalThis as unknown as {__fastlaneQueue?: QueueState};
+
+function state(): QueueState {
+  if (!g.__fastlaneQueue) {
+    g.__fastlaneQueue = {running: 0, recovered: false, executor: defaultExecutor};
+  }
+  return g.__fastlaneQueue;
+}
+
+// En `next dev`, l'etat survit au HMR mais l'executor capture du code perime :
+// on le rafraichit a chaque (re)chargement du module. Les tests appellent
+// setExecutor apres import, donc rien ne change pour eux.
+state().executor = defaultExecutor;
 
 // Injection pour les tests de file.
 export function setExecutor(fn: Executor): void {
-  executor = fn;
+  state().executor = fn;
 }
 
-let running = 0;
-const pending: {scriptId: number; jobId: number}[] = [];
+// Marque 'failed' les jobs restes 'running' apres un crash/redemarrage,
+// puis relance la pompe sur les 'pending' restants. Idempotent par process.
+export function ensureQueueRecovered(): void {
+  const s = state();
+  if (s.recovered) return;
+  s.recovered = true;
+  failRunningJobs('Interrompu par un redémarrage du serveur — clique sur Relancer');
+  pump();
+}
 
 export function enqueueRender(scriptId: number): number {
+  ensureQueueRecovered();
   const jobId = createJob(scriptId);
-  pending.push({scriptId, jobId});
   pump();
   return jobId;
 }
 
+function safeSetStatus(jobId: number, status: 'done' | 'failed', error?: string): void {
+  try {
+    setJobStatus(jobId, status, error);
+  } catch {
+    // DB indisponible (contention multi-process) : ne pas faire tomber la pompe
+  }
+}
+
 function pump(): void {
-  while (running < MAX_CONCURRENT && pending.length > 0) {
-    const {scriptId, jobId} = pending.shift()!;
-    running++;
-    setJobStatus(jobId, 'running');
-    executor(scriptId)
-      .then(() => setJobStatus(jobId, 'done'))
-      .catch((err: Error) => setJobStatus(jobId, 'failed', err.message?.slice(0, 1000)))
+  const s = state();
+  while (s.running < MAX_CONCURRENT) {
+    let claim: ReturnType<typeof claimNextPendingJob>;
+    try {
+      claim = claimNextPendingJob();
+    } catch {
+      break;
+    }
+    if (!claim) break;
+    const {id: jobId, scriptId} = claim;
+    s.running++;
+    let job: Promise<void>;
+    try {
+      job = Promise.resolve(s.executor(scriptId, jobId));
+    } catch (err) {
+      // executor qui leve en synchrone : ne pas fuiter le compteur
+      safeSetStatus(jobId, 'failed', (err as Error).message?.slice(0, 1000));
+      s.running--;
+      continue;
+    }
+    job
+      .then(() => safeSetStatus(jobId, 'done'))
+      .catch((err: Error) => safeSetStatus(jobId, 'failed', err.message?.slice(0, 1000)))
       .finally(() => {
-        running--;
+        s.running--;
         pump();
       });
   }
@@ -53,41 +111,23 @@ async function pickMusicFile(): Promise<string | undefined> {
   }
 }
 
-async function defaultExecutor(scriptId: number): Promise<void> {
-  const script = getScript(scriptId);
-  if (!script) throw new Error(`Script ${scriptId} introuvable`);
-  const product = getProduct(script.productId);
-  if (!product) throw new Error(`Produit ${script.productId} introuvable`);
+function killTree(pid: number | undefined): void {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    // child.kill() ne tue que cmd.exe, pas l'arbre en dessous (node/chrome).
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {windowsHide: true}).on('error', () => {});
+  } else {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // deja mort
+    }
+  }
+}
 
-  const mediaDir = path.join(process.cwd(), 'public', 'media', String(script.productId));
-  await fs.mkdir(mediaDir, {recursive: true});
-
-  // 1. Voix off complete (hook implicite dans la premiere scene + cta)
-  const voiceText = [...script.data.scenes.map((s) => s.voiceText), script.data.cta].join(' ');
-  const audioBase = path.join(mediaDir, `voice-${scriptId}`);
-  const {timings} = await synthesize(voiceText, audioBase);
-
-  // 2. Props du template
-  const images: string[] = product.data.localImages ?? [];
-  if (images.length === 0) throw new Error('Aucune image locale pour ce produit');
-  const props = {
-    images,
-    scenes: script.data.scenes,
-    timings,
-    price: product.data.price,
-    compareAtPrice: product.data.compareAtPrice,
-    brand: product.data.vendor ?? product.data.title.split(' ')[0],
-    audioFile: `media/${script.productId}/voice-${scriptId}.mp3`,
-    musicFile: await pickMusicFile(),
-    styleVariant: scriptId % 2 === 0 ? 'dark' : 'light',
-  };
-  const propsPath = path.join(mediaDir, `props-${scriptId}.json`);
-  await fs.writeFile(propsPath, JSON.stringify(props), 'utf8');
-
-  // 3. Rendu Remotion
-  const outRel = `media/${script.productId}/video-${scriptId}.mp4`;
-  const outAbs = path.join(process.cwd(), 'public', outRel);
-  await new Promise<void>((resolve, reject) => {
+function runRemotionRender(propsPath: string, outAbs: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const q = (s: string) => `"${s}"`;
     const child = spawn(
       'npx',
       [
@@ -95,21 +135,107 @@ async function defaultExecutor(scriptId: number): Promise<void> {
         'render',
         'video/index.ts',
         'Slideshow',
-        outAbs,
-        `--props=${propsPath}`,
+        q(outAbs),
+        `--props=${q(propsPath)}`,
         `--concurrency=${RENDER_CONCURRENCY}`,
+        '--crf=17',
+        '--jpeg-quality=90',
         '--log=error',
       ],
       {shell: true, windowsHide: true, cwd: process.cwd()}
     );
     let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      killTree(child.pid);
+      reject(new Error(`Rendu interrompu après ${RENDER_TIMEOUT_MS / 60_000} min (timeout)`));
+    }, RENDER_TIMEOUT_MS);
+
+    // stdout doit etre draine sinon le child bloque des ~64 Ko ecrits.
+    child.stdout.on('data', () => {});
     child.stderr.on('data', (d) => (stderr += d));
-    child.on('error', (err) => reject(err));
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (code === 0) resolve();
       else reject(new Error(`remotion render code ${code}: ${stderr.slice(-800)}`));
     });
   });
+}
 
+async function defaultExecutor(scriptId: number, jobId: number): Promise<void> {
+  const script = getScript(scriptId);
+  if (!script) throw new Error(`Script ${scriptId} introuvable`);
+  const product = getProduct(script.productId);
+  if (!product) throw new Error(`Produit ${script.productId} introuvable`);
+
+  const images: string[] = product.data.localImages ?? [];
+  if (images.length === 0) throw new Error('Aucune image locale pour ce produit');
+
+  const mediaDir = path.join(process.cwd(), 'public', 'media', String(script.productId));
+  await fs.mkdir(mediaDir, {recursive: true});
+
+  // Le CTA fait partie de la voix : on l'integre a la derniere scene pour que
+  // la repartition des timings colle a l'audio reel (sinon ~1 s de derive).
+  const scenes: Scene[] = script.data.scenes.map((s, i) =>
+    i === script.data.scenes.length - 1
+      ? {...s, voiceText: `${s.voiceText} ${script.data.cta}`}
+      : s
+  );
+  const voiceText = scenes.map((s) => s.voiceText).join(' ');
+
+  // Artefacts keyes par jobId : un retry concurrent ou un process orphelin
+  // n'ecrit jamais dans les fichiers d'un autre rendu.
+  const base = `${scriptId}-j${jobId}`;
+  const audioBase = path.join(mediaDir, `voice-${base}`);
+  const propsPath = path.join(mediaDir, `props-${base}.json`);
+  const outRel = `media/${script.productId}/video-${base}.mp4`;
+  const outAbs = path.join(process.cwd(), 'public', outRel);
+
+  const {timings} = await synthesize(voiceText, audioBase);
+
+  const musicFile = await pickMusicFile();
+  // Coupes calees sur le rythme de la musique (music-tempo), si musique.
+  let beatFrames: number[] | undefined;
+  if (musicFile) {
+    try {
+      beatFrames = (await detectBeats(musicFile)).map((s) => Math.round(s * 30));
+    } catch {
+      beatFrames = undefined; // pas bloquant : decoupage regulier en fallback
+    }
+  }
+
+  const props = {
+    images,
+    scenes,
+    timings,
+    price: product.data.price,
+    compareAtPrice: product.data.compareAtPrice,
+    brand: product.data.vendor ?? product.data.title.split(' ')[0],
+    audioFile: `media/${script.productId}/voice-${base}.mp3`,
+    musicFile,
+    beatFrames,
+    styleVariant: scriptId % 2 === 0 ? 'dark' : 'light',
+  };
+  await fs.writeFile(propsPath, JSON.stringify(props), 'utf8');
+
+  await runRemotionRender(propsPath, outAbs);
   insertVideo(scriptId, outRel);
+
+  // Succes : l'audio est encode dans le mp4, les intermediaires degagent.
+  // (En echec, on les garde volontairement pour le debug.)
+  await Promise.allSettled([
+    fs.rm(propsPath, {force: true}),
+    fs.rm(`${audioBase}.mp3`, {force: true}),
+    fs.rm(`${audioBase}.words.json`, {force: true}),
+  ]);
 }

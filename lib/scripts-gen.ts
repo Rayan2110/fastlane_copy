@@ -6,6 +6,8 @@ const SceneSchema = z.object({
   imageIndex: z.number().int().min(0),
   screenText: z.string().min(1).max(60),
   voiceText: z.string().min(5),
+  emphasisWords: z.array(z.string()).max(6).optional(),
+  emoji: z.string().max(8).optional(),
 });
 
 const ScriptSchema = z.object({
@@ -49,11 +51,13 @@ Réponds UNIQUEMENT avec un tableau JSON:
     "angle": "nom de l'angle",
     "hook": "phrase d'accroche",
     "scenes": [
-      {"imageIndex": 0, "screenText": "texte écran", "voiceText": "texte voix off"}
+      {"imageIndex": 0, "screenText": "texte écran", "voiceText": "texte voix off", "emphasisWords": ["mots", "forts"], "emoji": "🔥"}
     ],
     "cta": "appel à l'action"
   }
-]`;
+]
+
+Pour chaque scène: "emphasisWords" = 1-3 mots du voiceText à faire ressortir visuellement (bénéfice clé, chiffre, prix), "emoji" = un emoji pertinent pour le texte écran (optionnel).`;
 }
 
 export function parseScripts(raw: string, imageCount: number): VideoScript[] {
@@ -76,10 +80,7 @@ export function parseScripts(raw: string, imageCount: number): VideoScript[] {
   return valid;
 }
 
-export async function generateScripts(
-  product: ProductData,
-  count: number
-): Promise<VideoScript[]> {
+async function generateBatch(product: ProductData, count: number): Promise<VideoScript[]> {
   const prompt = buildScriptsPrompt(product, count);
   const raw = await runClaude(prompt);
   try {
@@ -90,4 +91,42 @@ export async function generateScripts(
     );
     return parseScripts(retryRaw, product.images.length);
   }
+}
+
+const BATCH_SIZE = 5; // au-dela, la reponse JSON risque la troncature
+const BATCH_CONCURRENCY = 2; // appels claude CLI simultanes max
+
+export type GenerateResult = {scripts: VideoScript[]; failedBatches: number};
+
+export async function generateScripts(
+  product: ProductData,
+  count: number
+): Promise<GenerateResult> {
+  const batches: number[] = [];
+  for (let rest = count; rest > 0; rest -= BATCH_SIZE) {
+    batches.push(Math.min(BATCH_SIZE, rest));
+  }
+
+  // Petite pool : un batch en echec ne jette pas les autres.
+  const scripts: VideoScript[] = [];
+  let failedBatches = 0;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < batches.length) {
+      const n = batches[cursor++];
+      try {
+        scripts.push(...(await generateBatch(product, n)));
+      } catch {
+        failedBatches++;
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({length: Math.min(BATCH_CONCURRENCY, batches.length)}, worker)
+  );
+
+  if (scripts.length === 0) {
+    throw new Error('La génération de scripts a échoué (tous les batchs en erreur)');
+  }
+  return {scripts: scripts.slice(0, count), failedBatches};
 }

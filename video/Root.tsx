@@ -2,8 +2,10 @@ import React from 'react';
 import {Composition} from 'remotion';
 import {Slideshow, slideshowCalculateMetadata, type SlideshowProps} from './Slideshow';
 
+// Props de demo pour `npm run remotion:preview` — fichiers reellement
+// presents dans public/media/preview/.
 const defaultProps: SlideshowProps = {
-  images: [],
+  images: ['media/preview/hero.jpg', 'media/preview/product.jpg'],
   scenes: [
     {imageIndex: 0, screenText: 'Aperçu', voiceText: 'Ceci est un aperçu du template.'},
     {imageIndex: 0, screenText: 'Fastlane Local', voiceText: 'Généré entièrement en local.'},
@@ -23,7 +25,7 @@ const defaultProps: SlideshowProps = {
   price: '39,90 €',
   compareAtPrice: '59,90 €',
   brand: 'FASTLANE',
-  audioFile: 'preview-silence.mp3',
+  audioFile: 'media/preview/voice.mp3',
   styleVariant: 'dark',
 };
 
