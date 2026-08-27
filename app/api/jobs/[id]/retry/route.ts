@@ -20,6 +20,11 @@ export async function POST(_req: Request, {params}: {params: {id: string}}) {
       {status: 409}
     );
   }
-  const jobId = enqueueRender(job.scriptId);
+  // Le retry conserve le format, l'avatar et le tier du job d'origine.
+  const jobId = enqueueRender(job.scriptId, {
+    format: job.format,
+    avatarId: job.avatarId ?? undefined,
+    tier: (job.tier ?? 'eco') as 'eco' | 'quality' | 'premium',
+  });
   return NextResponse.json({jobId});
 }
