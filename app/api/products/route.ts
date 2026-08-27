@@ -3,7 +3,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {extractProduct} from '@/lib/extract';
 import {downloadImages} from '@/lib/media';
-import {insertProduct, listProducts, updateProductData, deleteProduct} from '@/lib/db';
+import {
+  insertProduct,
+  listProducts,
+  updateProductData,
+  deleteProduct,
+  listVideoCounts,
+} from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +22,7 @@ function normalizeUrl(raw: string): string {
 }
 
 export async function GET() {
-  return NextResponse.json({products: listProducts()});
+  return NextResponse.json({products: listProducts(), videoCounts: listVideoCounts()});
 }
 
 export async function POST(req: Request) {

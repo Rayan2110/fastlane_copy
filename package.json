@@ -13,6 +13,7 @@
     "@remotion/google-fonts": "^4.0.257",
     "@remotion/noise": "^4.0.257",
     "@remotion/renderer": "^4.0.257",
+    "archiver": "^8.0.0",
     "better-sqlite3": "^12.2.0",
     "music-tempo": "^1.0.3",
     "next": "14.2.5",
@@ -23,6 +24,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/archiver": "^8.0.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20",
     "@types/react": "^18",

@@ -1,11 +1,12 @@
 import {NextResponse} from 'next/server';
 import {getProduct, insertScript} from '@/lib/db';
 import {generateScripts} from '@/lib/scripts-gen';
-import {enqueueRender} from '@/lib/render';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// Genere les scripts SANS lancer les rendus : l'utilisateur relit, edite,
+// ecreme, puis rend sa selection via POST /api/scripts/render.
 export async function POST(req: Request, {params}: {params: {id: string}}) {
   const id = Number(params.id);
   const product = getProduct(id);
@@ -22,10 +23,8 @@ export async function POST(req: Request, {params}: {params: {id: string}}) {
   try {
     const {scripts, failedBatches} = await generateScripts(product.data, count);
     const scriptIds = scripts.map((s) => insertScript(id, s));
-    const jobIds = scriptIds.map((sid) => enqueueRender(sid));
     return NextResponse.json({
       scriptIds,
-      jobIds,
       warning:
         failedBatches > 0
           ? `${failedBatches} lot(s) de scripts ont échoué — ${scripts.length} scripts générés quand même`

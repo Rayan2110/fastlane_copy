@@ -10,7 +10,7 @@ const SceneSchema = z.object({
   emoji: z.string().max(8).optional(),
 });
 
-const ScriptSchema = z.object({
+export const ScriptSchema = z.object({
   angle: z.string().min(1),
   hook: z.string().min(1),
   scenes: z.array(SceneSchema).min(2).max(6),
@@ -78,6 +78,19 @@ export function parseScripts(raw: string, imageCount: number): VideoScript[] {
   }
   if (valid.length === 0) throw new Error('Aucun script valide dans la réponse de Claude');
   return valid;
+}
+
+// Regenere UN script en imposant l'angle (bouton "Régénérer" de l'UI).
+export async function regenerateScript(
+  product: ProductData,
+  angle: string
+): Promise<VideoScript> {
+  const prompt =
+    buildScriptsPrompt(product, 1) +
+    `\n\nCONTRAINTE SUPPLÉMENTAIRE: le script doit obligatoirement utiliser l'angle "${angle}", avec un hook et des formulations DIFFÉRENTS des versions précédentes.`;
+  const raw = await runClaude(prompt);
+  const scripts = parseScripts(raw, product.images.length);
+  return scripts[0];
 }
 
 async function generateBatch(product: ProductData, count: number): Promise<VideoScript[]> {

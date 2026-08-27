@@ -184,3 +184,115 @@ a.back {
   text-decoration: none;
   font-size: 14px;
 }
+
+/* --- Revue de scripts (Phase C) --- */
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+.script-list {
+  display: grid;
+  gap: 10px;
+}
+
+.script-card {
+  background: var(--panel);
+  border: 1px solid #262636;
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.script-card input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.script-card .hook {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+
+.chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chip.angle {
+  background: var(--panel-2);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+button.small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.script-editor {
+  margin-top: 12px;
+  border-top: 1px solid #262636;
+  padding-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.field input,
+.field textarea {
+  background: var(--panel-2);
+  border: 1px solid #2e2e40;
+  border-radius: 8px;
+  color: var(--text);
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.scene-edit {
+  border: 1px solid #262636;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.scene-head {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.button-link {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--accent-dark);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}

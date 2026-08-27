@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import {ProductView} from '../../ui';
+import {ProductView} from './view';
 
 export const dynamic = 'force-dynamic';
 
