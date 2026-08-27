@@ -16,6 +16,9 @@ import {
   deleteProduct,
   claimNextPendingJob,
   failRunningJobs,
+  updateScriptData,
+  listVideoCounts,
+  markAllVideosPosted,
 } from '../lib/db';
 import {sampleProduct, sampleScript} from './fixtures/sample';
 
@@ -80,6 +83,24 @@ describe('db', () => {
     expect(n).toBe(1);
     expect(getJob(j1)!.status).toBe('failed');
     expect(getJob(j1)!.error).toBe('interrompu');
+  });
+
+  it('met a jour un script en place', () => {
+    const pid = insertProduct(sampleProduct);
+    const sid = insertScript(pid, sampleScript);
+    updateScriptData(sid, {...sampleScript, hook: 'Nouveau hook'});
+    expect(listScripts(pid)[0].data.hook).toBe('Nouveau hook');
+  });
+
+  it('compte les videos et marque tout publie', () => {
+    const pid = insertProduct(sampleProduct);
+    const sid = insertScript(pid, sampleScript);
+    insertVideo(sid, 'a.mp4');
+    const v2 = insertVideo(sid, 'b.mp4');
+    setVideoPosted(v2, true);
+    expect(listVideoCounts()[pid]).toEqual({total: 2, unposted: 1});
+    expect(markAllVideosPosted(pid)).toBe(1);
+    expect(listVideoCounts()[pid]).toEqual({total: 2, unposted: 0});
   });
 
   it('cycle de vie job', () => {

@@ -10,10 +10,13 @@ karaoké) prêtes à poster sur TikTok, Reels et Shorts.
 Double-clique sur **`start-fastlane.bat`** — le navigateur s'ouvre sur
 http://localhost:3210.
 
-1. Colle l'URL d'un produit (ta boutique Shopify ou n'importe quelle fiche produit) et clique **Analyser**
-2. Ouvre le produit, choisis un nombre de vidéos, clique **Générer les vidéos**
-3. Les rendus tournent en fond (~3 min par vidéo, 2 en parallèle) — la page se met à jour toute seule
-4. Prévisualise, télécharge, marque « publiée » ce que tu as posté
+1. Colle l'URL d'un produit (ta boutique Shopify ou n'importe quelle fiche produit — avec ou sans https://) et clique **Analyser**
+2. Ouvre le produit → **1 · Générer les scripts** : Claude écrit 5/10/20 scripts (aucun rendu lancé)
+3. **Relis, édite (✎), régénère (↻), écrème** — puis coche les bons et **2 · Rendre la sélection**
+4. Les rendus tournent en fond (~2-3 min par vidéo, 2 en parallèle) — la page se met à jour toute seule
+5. Prévisualise, puis **Télécharger les non publiées (ZIP)** (noms de fichiers = produit_angle_hook, prêts pour les légendes) et **Tout marquer publié**
+
+Le dashboard filtre par boutique et par recherche, avec le compteur « à poster » par produit.
 
 ## Prérequis (déjà en place sur ce PC)
 

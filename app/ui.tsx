@@ -1,31 +1,34 @@
 'use client';
 
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import Link from 'next/link';
-import type {ProductData, VideoScript, JobStatus} from '@/lib/types';
+import type {ProductData} from '@/lib/types';
 
 type ProductRow = {id: number; data: ProductData; createdAt: string};
-type ScriptRow = {id: number; productId: number; data: VideoScript};
-type VideoRow = {id: number; scriptId: number; filePath: string; posted: boolean};
-type JobRow = {id: number; scriptId: number; status: JobStatus; error: string | null};
+type VideoCounts = Record<number, {total: number; unposted: number}>;
 
-const STATUS_LABEL: Record<JobStatus, string> = {
-  pending: 'en attente',
-  running: 'rendu en cours…',
-  done: 'terminé',
-  failed: 'échec',
-};
+function storeOf(p: ProductRow): string {
+  try {
+    return new URL(p.data.sourceUrl).hostname.replace(/^www\./, '');
+  } catch {
+    return 'inconnu';
+  }
+}
 
 export function Dashboard() {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [products, setProducts] = useState<ProductRow[]>([]);
+  const [counts, setCounts] = useState<VideoCounts>({});
+  const [search, setSearch] = useState('');
+  const [store, setStore] = useState('');
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/products');
     const json = await res.json();
     setProducts(json.products ?? []);
+    setCounts(json.videoCounts ?? {});
   }, []);
 
   useEffect(() => {
@@ -52,6 +55,17 @@ export function Dashboard() {
     }
   };
 
+  const stores = useMemo(
+    () => [...new Set(products.map(storeOf))].sort(),
+    [products]
+  );
+
+  const visible = products.filter((p) => {
+    if (store && storeOf(p) !== store) return false;
+    if (search && !p.data.title.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
   return (
     <>
       <div className="card">
@@ -70,198 +84,54 @@ export function Dashboard() {
         {error ? <div className="error-box">{error}</div> : null}
       </div>
 
-      <div className="grid">
-        {products.map((p) => (
-          <Link key={p.id} href={`/product/${p.id}`} className="card product-card">
-            {p.data.localImages?.[0] ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={`/${p.data.localImages[0]}`} alt={p.data.title} />
-            ) : null}
-            <h3>{p.data.title}</h3>
-            <div className="meta">
-              {p.data.price}
-              {p.data.compareAtPrice ? ` (au lieu de ${p.data.compareAtPrice})` : ''}
-            </div>
-          </Link>
-        ))}
-      </div>
-    </>
-  );
-}
-
-export function ProductView({productId}: {productId: number}) {
-  const [data, setData] = useState<{
-    product: ProductRow;
-    scripts: ScriptRow[];
-    videos: VideoRow[];
-    jobs: JobRow[];
-  } | null>(null);
-  const [count, setCount] = useState(5);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    const res = await fetch(`/api/products/${productId}`);
-    if (res.ok) setData(await res.json());
-  }, [productId]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const hasActiveJobs = data?.jobs.some((j) => j.status === 'pending' || j.status === 'running');
-
-  useEffect(() => {
-    if (!hasActiveJobs) return;
-    const t = setInterval(refresh, 4000);
-    return () => clearInterval(t);
-  }, [hasActiveJobs, refresh]);
-
-  const generate = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/products/${productId}/generate`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({count}),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Erreur inconnue');
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const [retryingIds, setRetryingIds] = useState<Set<number>>(new Set());
-
-  const retryJob = async (jobId: number) => {
-    if (retryingIds.has(jobId)) return;
-    setRetryingIds((prev) => new Set(prev).add(jobId));
-    try {
-      await fetch(`/api/jobs/${jobId}/retry`, {method: 'POST'});
-      await refresh();
-    } finally {
-      setRetryingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(jobId);
-        return next;
-      });
-    }
-  };
-
-  const togglePosted = async (video: VideoRow) => {
-    await fetch(`/api/videos/${video.id}/posted`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({posted: !video.posted}),
-    });
-    await refresh();
-  };
-
-  if (!data) return <p className="sub">Chargement…</p>;
-
-  const {product, scripts, videos, jobs} = data;
-  const scriptById = new Map(scripts.map((s) => [s.id, s]));
-  // Un seul statut par script : le job le plus recent (les vieilles lignes
-  // "echec" deja relancees n'ont plus d'interet).
-  const latestByScript = new Map<number, JobRow>();
-  for (const j of [...jobs].sort((a, b) => a.id - b.id)) {
-    latestByScript.set(j.scriptId, j);
-  }
-  const visibleJobs = [...latestByScript.values()].sort((a, b) => b.id - a.id);
-
-  return (
-    <>
-      <h1>{product.data.title}</h1>
-      <p className="sub">
-        {product.data.price}
-        {product.data.compareAtPrice ? ` (au lieu de ${product.data.compareAtPrice})` : ''} ·{' '}
-        {product.data.localImages?.length ?? 0} images · {videos.length} vidéos
-      </p>
-
-      <div className="card">
-        <div className="row">
-          <select value={count} onChange={(e) => setCount(Number(e.target.value))}>
-            <option value={3}>3 vidéos</option>
-            <option value={5}>5 vidéos</option>
-            <option value={10}>10 vidéos</option>
-            <option value={20}>20 vidéos</option>
+      {products.length > 1 ? (
+        <div className="row" style={{marginTop: 20, gap: 10}}>
+          <input
+            type="url"
+            style={{maxWidth: 280}}
+            placeholder="🔍 Rechercher un produit…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select style={{flex: 'none', minWidth: 180}} value={store} onChange={(e) => setStore(e.target.value)}>
+            <option value="">Toutes les boutiques</option>
+            {stores.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
           </select>
-          <button onClick={generate} disabled={busy}>
-            {busy ? 'Claude écrit les scripts…' : 'Générer les vidéos'}
-          </button>
         </div>
-        {error ? <div className="error-box">{error}</div> : null}
+      ) : null}
+
+      <div className="grid">
+        {visible.map((p) => {
+          const c = counts[p.id];
+          return (
+            <Link key={p.id} href={`/product/${p.id}`} className="card product-card">
+              {p.data.localImages?.[0] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={`/${p.data.localImages[0]}`} alt={p.data.title} />
+              ) : null}
+              <h3>{p.data.title}</h3>
+              <div className="meta">
+                {p.data.price || 'prix non détecté'}
+                {p.data.compareAtPrice ? ` (au lieu de ${p.data.compareAtPrice})` : ''}
+              </div>
+              <div className="meta" style={{marginTop: 6}}>
+                <span className="chip angle">{storeOf(p)}</span>{' '}
+                {c ? (
+                  <span className={`badge ${c.unposted > 0 ? 'running' : 'done'}`}>
+                    {c.unposted > 0 ? `${c.unposted} à poster` : `${c.total} publiées`}
+                  </span>
+                ) : (
+                  <span className="badge pending">pas de vidéo</span>
+                )}
+              </div>
+            </Link>
+          );
+        })}
       </div>
-
-      {jobs.length > 0 ? (
-        <section>
-          <h2>Rendus</h2>
-          <div className="card">
-            {visibleJobs.map((j) => {
-              const script = scriptById.get(j.scriptId);
-              return (
-                <div key={j.id} style={{padding: '6px 0'}}>
-                  <div className="row" style={{justifyContent: 'space-between'}}>
-                    <span style={{color: 'var(--muted)', fontSize: 14}}>
-                      {script ? `${script.data.angle} — « ${script.data.hook} »` : `Script ${j.scriptId}`}
-                    </span>
-                    <span className="row" style={{gap: 8}}>
-                      <span className={`badge ${j.status}`}>{STATUS_LABEL[j.status]}</span>
-                      {j.status === 'failed' ? (
-                        <button
-                          className="ghost"
-                          style={{padding: '4px 10px', fontSize: 12}}
-                          disabled={retryingIds.has(j.id)}
-                          onClick={() => retryJob(j.id)}
-                        >
-                          {retryingIds.has(j.id) ? '…' : 'Relancer'}
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-                  {j.status === 'failed' && j.error ? (
-                    <div className="error-box" style={{marginTop: 6, fontSize: 13}}>{j.error}</div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      {videos.length > 0 ? (
-        <section>
-          <h2>Vidéos</h2>
-          <div className="video-grid">
-            {videos.map((v) => {
-              const script = scriptById.get(v.scriptId);
-              return (
-                <div key={v.id} className="card video-card">
-                  <video src={`/${v.filePath}`} controls preload="metadata" />
-                  {script ? (
-                    <div className="meta" style={{color: 'var(--muted)', fontSize: 13, marginTop: 8}}>
-                      {script.data.angle}
-                    </div>
-                  ) : null}
-                  <div className="row">
-                    <a href={`/${v.filePath}`} download style={{color: 'var(--accent)', fontSize: 14}}>
-                      Télécharger
-                    </a>
-                    <button className="ghost" style={{padding: '6px 12px', fontSize: 13}} onClick={() => togglePosted(v)}>
-                      {v.posted ? '✓ Publiée' : 'Marquer publiée'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
     </>
   );
 }

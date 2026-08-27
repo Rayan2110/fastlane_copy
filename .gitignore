@@ -6,3 +6,5 @@ public/media/
 demo/node_modules/
 demo/out/
 *.log
+
+.env*

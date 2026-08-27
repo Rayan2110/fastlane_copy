@@ -160,6 +160,10 @@ export function listScripts(productId: number): ScriptRow[] {
   }));
 }
 
+export function updateScriptData(id: number, data: VideoScript): void {
+  getDb().prepare('UPDATE scripts SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
+}
+
 export function insertVideo(scriptId: number, filePath: string): number {
   const r = getDb()
     .prepare('INSERT INTO videos (script_id, file_path) VALUES (?, ?)')
@@ -194,6 +198,32 @@ export function listVideos(productId: number): VideoRow[] {
 
 export function setVideoPosted(id: number, posted: boolean): void {
   getDb().prepare('UPDATE videos SET posted = ? WHERE id = ?').run(posted ? 1 : 0, id);
+}
+
+export function markAllVideosPosted(productId: number): number {
+  const r = getDb()
+    .prepare(
+      `UPDATE videos SET posted = 1
+       WHERE posted = 0 AND script_id IN (SELECT id FROM scripts WHERE product_id = ?)`
+    )
+    .run(productId);
+  return r.changes;
+}
+
+// Compteurs de videos par produit (pour les cartes du dashboard).
+export function listVideoCounts(): Record<number, {total: number; unposted: number}> {
+  const rows = getDb()
+    .prepare(
+      `SELECT s.product_id AS productId,
+              COUNT(*) AS total,
+              SUM(CASE WHEN v.posted = 0 THEN 1 ELSE 0 END) AS unposted
+       FROM videos v JOIN scripts s ON s.id = v.script_id
+       GROUP BY s.product_id`
+    )
+    .all() as {productId: number; total: number; unposted: number}[];
+  const out: Record<number, {total: number; unposted: number}> = {};
+  for (const r of rows) out[r.productId] = {total: r.total, unposted: r.unposted};
+  return out;
 }
 
 export function createJob(scriptId: number): number {
