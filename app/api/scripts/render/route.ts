@@ -2,6 +2,9 @@ import {NextResponse} from 'next/server';
 import {getScript, hasActiveJobForScript, getAvatar} from '@/lib/db';
 import {enqueueRender} from '@/lib/render';
 import type {RenderFormat} from '@/lib/types';
+import type {QualityTier} from '@/lib/fal';
+
+const TIERS: QualityTier[] = ['eco', 'quality', 'premium'];
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,15 +15,18 @@ export async function POST(req: Request) {
   let scriptIds: number[];
   let format: RenderFormat = 'slideshow';
   let avatarId: number | undefined;
+  let tier: QualityTier = 'eco';
   try {
     const body = (await req.json()) as {
       scriptIds: number[];
       format?: RenderFormat;
       avatarId?: number;
+      tier?: QualityTier;
     };
     scriptIds = body.scriptIds;
     if (body.format === 'avatar') format = 'avatar';
     avatarId = body.avatarId;
+    if (body.tier && TIERS.includes(body.tier)) tier = body.tier;
   } catch {
     return NextResponse.json({error: 'Body JSON attendu: {scriptIds}'}, {status: 400});
   }
@@ -43,7 +49,7 @@ export async function POST(req: Request) {
       skipped.push(sid);
       continue;
     }
-    jobIds.push(enqueueRender(sid, {format, avatarId}));
+    jobIds.push(enqueueRender(sid, {format, avatarId, tier}));
   }
   return NextResponse.json({jobIds, skipped});
 }

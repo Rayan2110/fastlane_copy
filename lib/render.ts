@@ -15,7 +15,7 @@ import {synthesize} from './tts';
 import {detectBeats} from './beats';
 import {getAvatar} from './db';
 import {ensureHoldImage} from './avatars';
-import {falUpload, falRun, downloadTo, FAL_MODELS} from './fal';
+import {falUpload, falRun, downloadTo, AVATAR_TIERS, type QualityTier} from './fal';
 import type {Scene, RenderFormat} from './types';
 
 const MAX_CONCURRENT = 2;
@@ -28,6 +28,7 @@ export type ClaimedJob = {
   scriptId: number;
   format: RenderFormat;
   avatarId: number | null;
+  tier: string;
 };
 
 type Executor = (job: ClaimedJob) => Promise<void>;
@@ -67,10 +68,10 @@ export function ensureQueueRecovered(): void {
 
 export function enqueueRender(
   scriptId: number,
-  opts: {format?: RenderFormat; avatarId?: number} = {}
+  opts: {format?: RenderFormat; avatarId?: number; tier?: QualityTier} = {}
 ): number {
   ensureQueueRecovered();
-  const jobId = createJob(scriptId, opts.format ?? 'slideshow', opts.avatarId);
+  const jobId = createJob(scriptId, opts.format ?? 'slideshow', opts.avatarId, opts.tier ?? 'eco');
   pump();
   return jobId;
 }
@@ -191,7 +192,7 @@ function runRemotionRender(
 }
 
 async function defaultExecutor(claim: ClaimedJob): Promise<void> {
-  const {scriptId, id: jobId, format, avatarId} = claim;
+  const {scriptId, id: jobId, format, avatarId, tier} = claim;
   const script = getScript(scriptId);
   if (!script) throw new Error(`Script ${scriptId} introuvable`);
   const product = getProduct(script.productId);
@@ -261,19 +262,20 @@ async function defaultExecutor(claim: ClaimedJob): Promise<void> {
     }
     // 1. Avatar tenant le produit (genere une fois par couple avatar/produit).
     const holdRel = await ensureHoldImage(avatar, script.productId, images[0]);
-    // 2. Video parlante Kling (image + audio -> mp4 lip-synce).
+    // 2. Video parlante (image + audio -> mp4 lip-synce), modele selon le tier.
+    const tierConfig = AVATAR_TIERS[tier as QualityTier] ?? AVATAR_TIERS.eco;
     const [imageUrl, audioUrl] = await Promise.all([
       falUpload(path.join(process.cwd(), 'public', holdRel), 'image/png'),
       falUpload(`${audioBase}.mp3`, 'audio/mpeg'),
     ]);
-    const out = await falRun<{video: {url: string}}>(FAL_MODELS.talkingAvatar, {
-      image_url: imageUrl,
-      audio_url: audioUrl,
-      prompt: '.',
-    });
-    if (!out.video?.url) throw new Error('Kling n’a retourné aucune vidéo');
+    const out = await falRun<{video?: {url?: string}; videos?: {url?: string}[]}>(
+      tierConfig.model,
+      tierConfig.buildInput(imageUrl, audioUrl)
+    );
+    const videoUrl = out.video?.url ?? out.videos?.[0]?.url;
+    if (!videoUrl) throw new Error(`${tierConfig.model} n’a retourné aucune vidéo`);
     const avatarClipRel = `media/${script.productId}/avatarclip-${base}.mp4`;
-    await downloadTo(out.video.url, path.join(process.cwd(), 'public', avatarClipRel));
+    await downloadTo(videoUrl, path.join(process.cwd(), 'public', avatarClipRel));
 
     compositionId = 'AvatarUGC';
     props = {...shared, avatarVideo: avatarClipRel, brollClips: product.data.brollClips};

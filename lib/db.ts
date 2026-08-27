@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   error TEXT,
   format TEXT NOT NULL DEFAULT 'slideshow',
   avatar_id INTEGER,
+  tier TEXT NOT NULL DEFAULT 'eco',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS avatars (
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS store_passwords (
 const MIGRATIONS = [
   `ALTER TABLE jobs ADD COLUMN format TEXT NOT NULL DEFAULT 'slideshow'`,
   `ALTER TABLE jobs ADD COLUMN avatar_id INTEGER`,
+  `ALTER TABLE jobs ADD COLUMN tier TEXT NOT NULL DEFAULT 'eco'`,
 ];
 
 export function openDb(dbPath?: string): Database.Database {
@@ -127,19 +129,25 @@ export function deleteProduct(id: number): void {
 
 // Reclame atomiquement le prochain job en attente (passe en 'running').
 export function claimNextPendingJob():
-  | {id: number; scriptId: number; format: RenderFormat; avatarId: number | null}
+  | {id: number; scriptId: number; format: RenderFormat; avatarId: number | null; tier: string}
   | undefined {
   const row = getDb()
     .prepare(
       `UPDATE jobs SET status = 'running'
        WHERE id = (SELECT id FROM jobs WHERE status = 'pending' ORDER BY id LIMIT 1)
-       RETURNING id, script_id, format, avatar_id`
+       RETURNING id, script_id, format, avatar_id, tier`
     )
     .get() as
-    | {id: number; script_id: number; format: RenderFormat; avatar_id: number | null}
+    | {id: number; script_id: number; format: RenderFormat; avatar_id: number | null; tier: string}
     | undefined;
   return (
-    row && {id: row.id, scriptId: row.script_id, format: row.format, avatarId: row.avatar_id}
+    row && {
+      id: row.id,
+      scriptId: row.script_id,
+      format: row.format,
+      avatarId: row.avatar_id,
+      tier: row.tier,
+    }
   );
 }
 
@@ -262,11 +270,12 @@ export function listVideoCounts(): Record<number, {total: number; unposted: numb
 export function createJob(
   scriptId: number,
   format: RenderFormat = 'slideshow',
-  avatarId?: number
+  avatarId?: number,
+  tier: string = 'eco'
 ): number {
   const r = getDb()
-    .prepare('INSERT INTO jobs (script_id, format, avatar_id) VALUES (?, ?, ?)')
-    .run(scriptId, format, avatarId ?? null);
+    .prepare('INSERT INTO jobs (script_id, format, avatar_id, tier) VALUES (?, ?, ?, ?)')
+    .run(scriptId, format, avatarId ?? null, tier);
   return Number(r.lastInsertRowid);
 }
 

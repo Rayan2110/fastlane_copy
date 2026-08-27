@@ -12,8 +12,11 @@ export async function POST(req: Request, {params}: {params: {id: string}}) {
     return NextResponse.json({error: 'Produit introuvable'}, {status: 404});
   }
   let imageIndex: number;
+  let tier: 'eco' | 'quality' | 'premium' = 'eco';
   try {
-    ({imageIndex} = (await req.json()) as {imageIndex: number});
+    const body = (await req.json()) as {imageIndex: number; tier?: typeof tier};
+    imageIndex = body.imageIndex;
+    if (body.tier && ['eco', 'quality', 'premium'].includes(body.tier)) tier = body.tier;
   } catch {
     return NextResponse.json({error: 'Body JSON attendu: {imageIndex}'}, {status: 400});
   }
@@ -21,7 +24,7 @@ export async function POST(req: Request, {params}: {params: {id: string}}) {
     return NextResponse.json({error: 'imageIndex invalide'}, {status: 400});
   }
   try {
-    const path = await generateBrollClip(id, imageIndex);
+    const path = await generateBrollClip(id, imageIndex, tier);
     return NextResponse.json({path});
   } catch (err) {
     return NextResponse.json({error: (err as Error).message}, {status: 500});
