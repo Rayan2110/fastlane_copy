@@ -9,6 +9,7 @@ import {
   updateProductData,
   deleteProduct,
   listVideoCounts,
+  setStorePassword,
 } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -27,8 +28,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   let url: string;
+  let storePassword: string | undefined;
   try {
-    ({url} = (await req.json()) as {url: string});
+    ({url, storePassword} = (await req.json()) as {url: string; storePassword?: string});
   } catch {
     return NextResponse.json({error: 'Body JSON attendu: {url}'}, {status: 400});
   }
@@ -37,7 +39,12 @@ export async function POST(req: Request) {
   }
   let id: number | undefined;
   try {
-    const product = await extractProduct(normalizeUrl(url));
+    const normalized = normalizeUrl(url);
+    if (storePassword?.trim()) {
+      // Mot de passe visiteur d'une boutique protegee : memorise par host.
+      setStorePassword(new URL(normalized).hostname, storePassword.trim());
+    }
+    const product = await extractProduct(normalized);
     id = insertProduct(product);
     const {sourceUrls, localImages} = await downloadImages(product.images, id);
     // images et localImages restent alignes : les scripts indexent dedans.

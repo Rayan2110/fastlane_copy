@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS avatars (
   image_path TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS store_passwords (
+  host TEXT PRIMARY KEY,
+  password TEXT NOT NULL
+);
 `;
 
 // Colonnes ajoutees en phase D sur des bases existantes.
@@ -346,4 +350,19 @@ export function listAvatars(): AvatarRow[] {
 
 export function deleteAvatar(id: number): void {
   getDb().prepare('DELETE FROM avatars WHERE id = ?').run(id);
+}
+
+// --- Mots de passe visiteur des boutiques Shopify protegees ---
+
+export function setStorePassword(host: string, password: string): void {
+  getDb()
+    .prepare('INSERT INTO store_passwords (host, password) VALUES (?, ?) ON CONFLICT(host) DO UPDATE SET password = excluded.password')
+    .run(host, password);
+}
+
+export function getStorePassword(host: string): string | undefined {
+  const row = getDb().prepare('SELECT password FROM store_passwords WHERE host = ?').get(host) as
+    | {password: string}
+    | undefined;
+  return row?.password;
 }

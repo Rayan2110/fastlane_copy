@@ -1,5 +1,6 @@
 import type {ProductData} from './types';
 import {runClaude, extractJson} from './claude';
+import {fetchWithStoreAuth} from './shopify-auth';
 
 const CURRENCY_SYMBOLS: Record<string, string> = {EUR: '€', USD: '$', GBP: '£'};
 
@@ -131,21 +132,21 @@ export function extractImageUrls(html: string, baseUrl: string): string[] {
 export async function extractProduct(url: string): Promise<ProductData> {
   const shopifyUrl = toShopifyJsonUrl(url);
   if (shopifyUrl) {
-    const res = await fetch(shopifyUrl, {
-      headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
-    });
+    const res = await fetchWithStoreAuth(shopifyUrl);
     if (res.ok) {
-      const json = await res.json();
-      if ((json as ShopifyProductJson).product) {
-        return parseShopifyProduct(json, url);
+      try {
+        const json = await res.json();
+        if ((json as ShopifyProductJson).product) {
+          return parseShopifyProduct(json, url);
+        }
+      } catch {
+        // pas du JSON (page password rendue en HTML, etc.) → generique
       }
     }
     // Pas du Shopify finalement → on retombe sur le generique.
   }
 
-  const res = await fetch(url, {
-    headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
-  });
+  const res = await fetchWithStoreAuth(url);
   if (!res.ok) {
     throw new Error(`Page inaccessible (HTTP ${res.status})`);
   }

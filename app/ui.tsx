@@ -17,6 +17,7 @@ function storeOf(p: ProductRow): string {
 
 export function Dashboard() {
   const [url, setUrl] = useState('');
+  const [storePassword, setStorePassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -42,11 +43,12 @@ export function Dashboard() {
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url}),
+        body: JSON.stringify({url, storePassword: storePassword || undefined}),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erreur inconnue');
       setUrl('');
+      setStorePassword('');
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -80,6 +82,15 @@ export function Dashboard() {
           <button onClick={analyze} disabled={busy || !url}>
             {busy ? 'Analyse…' : 'Analyser'}
           </button>
+        </div>
+        <div className="row" style={{marginTop: 10}}>
+          <input
+            type="url"
+            style={{maxWidth: 320}}
+            placeholder="Mot de passe visiteur (si boutique protégée)"
+            value={storePassword}
+            onChange={(e) => setStorePassword(e.target.value)}
+          />
         </div>
         {error ? <div className="error-box">{error}</div> : null}
       </div>
