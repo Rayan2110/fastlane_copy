@@ -3,15 +3,21 @@
 import {useCallback, useEffect, useState} from 'react';
 import type {ProductData, VideoScript, JobStatus, Scene, AvatarRow, RenderFormat} from '@/lib/types';
 
-const AVATAR_PRICE_PER_SECOND = 0.0562;
+type Tier = 'eco' | 'quality' | 'premium';
 const WORDS_PER_SECOND = 2.6; // debit moyen du TTS francais
 
-function estimateAvatarCost(script: VideoScript): number {
+const TIER_INFO: Record<Tier, {label: string; avatarPerSecond: number; brollPerClip: number}> = {
+  eco: {label: '🟢 Éco', avatarPerSecond: 0.0562, brollPerClip: 0.11},
+  quality: {label: '🟡 Qualité', avatarPerSecond: 0.16, brollPerClip: 0.2},
+  premium: {label: '🔴 Premium', avatarPerSecond: 0.3, brollPerClip: 2.35},
+};
+
+function estimateAvatarCost(script: VideoScript, tier: Tier): number {
   const words = [...script.scenes.map((s) => s.voiceText), script.cta]
     .join(' ')
     .split(/\s+/)
     .filter(Boolean).length;
-  return (words / WORDS_PER_SECOND) * AVATAR_PRICE_PER_SECOND;
+  return (words / WORDS_PER_SECOND) * TIER_INFO[tier].avatarPerSecond;
 }
 
 type ProductRow = {id: number; data: ProductData; createdAt: string};
@@ -187,6 +193,7 @@ export function ProductView({productId}: {productId: number}) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [retryingIds, setRetryingIds] = useState<Set<number>>(new Set());
   const [format, setFormat] = useState<RenderFormat>('slideshow');
+  const [tier, setTier] = useState<Tier>('eco');
   const [avatars, setAvatars] = useState<AvatarRow[]>([]);
   const [avatarId, setAvatarId] = useState<number | ''>('');
   const [brollBusy, setBrollBusy] = useState<Set<number>>(new Set());
@@ -245,7 +252,12 @@ export function ProductView({productId}: {productId: number}) {
       const res = await fetch('/api/scripts/render', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({scriptIds: [...selected], format, avatarId: avatarId || undefined}),
+        body: JSON.stringify({
+          scriptIds: [...selected],
+          format,
+          avatarId: avatarId || undefined,
+          tier,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erreur inconnue');
@@ -295,7 +307,7 @@ export function ProductView({productId}: {productId: number}) {
       const res = await fetch(`/api/products/${productId}/broll`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({imageIndex}),
+        body: JSON.stringify({imageIndex, tier}),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erreur inconnue');
@@ -367,6 +379,16 @@ export function ProductView({productId}: {productId: number}) {
             <option value="slideshow">🎞 Slideshow (gratuit)</option>
             <option value="avatar">🧑 Avatar UGC (payant)</option>
           </select>
+          <select
+            style={{flex: 'none', minWidth: 150}}
+            value={tier}
+            onChange={(e) => setTier(e.target.value as Tier)}
+            title="Niveau de qualité des générations IA (avatars et B-roll)"
+          >
+            <option value="eco">🟢 Éco</option>
+            <option value="quality">🟡 Qualité</option>
+            <option value="premium">🔴 Premium</option>
+          </select>
           {format === 'avatar' ? (
             <select
               style={{flex: 'none', minWidth: 160}}
@@ -394,13 +416,13 @@ export function ProductView({productId}: {productId: number}) {
           {format === 'avatar' && data ? (
             <>
               {' '}
-              Avatar : crédits fal.ai —{' '}
+              Avatar {TIER_INFO[tier].label} : crédits fal.ai —{' '}
               <b style={{color: 'var(--accent)'}}>
                 ~
                 {[...selected]
                   .reduce((sum, id) => {
                     const s = scripts.find((x) => x.id === id);
-                    return sum + (s ? estimateAvatarCost(s.data) : 0);
+                    return sum + (s ? estimateAvatarCost(s.data, tier) : 0);
                   }, 0)
                   .toFixed(2)}{' '}
                 $ pour la sélection
@@ -425,8 +447,10 @@ export function ProductView({productId}: {productId: number}) {
         <section>
           <h2>Images du produit</h2>
           <p className="hint" style={{marginTop: 0}}>
-            🎬 « Animer » transforme une photo en clip vidéo de 5 s (~0,11 $ de crédits fal.ai).
-            Les clips remplacent automatiquement l’image fixe dans toutes les prochaines vidéos.
+            🎬 « Animer » transforme une photo en clip vidéo de 5 s (
+            {TIER_INFO[tier].brollPerClip.toFixed(2).replace('.', ',')} $ en tier{' '}
+            {TIER_INFO[tier].label}). Les clips remplacent automatiquement l’image fixe dans
+            toutes les prochaines vidéos. Ré-animer une image écrase l’ancien clip.
           </p>
           <div className="image-strip">
             {product.data.localImages!.map((img, i) => {
@@ -436,14 +460,26 @@ export function ProductView({productId}: {productId: number}) {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/${img}`} alt={`image ${i}`} />
                   {animated ? (
-                    <span className="badge done">🎬 animée</span>
+                    <span className="row" style={{gap: 6}}>
+                      <span className="badge done">🎬 animée</span>
+                      <button
+                        className="ghost small"
+                        disabled={brollBusy.has(i)}
+                        onClick={() => animateImage(i)}
+                        title="Régénérer le clip dans le tier sélectionné"
+                      >
+                        {brollBusy.has(i) ? '…' : '↻'}
+                      </button>
+                    </span>
                   ) : (
                     <button
                       className="ghost small"
                       disabled={brollBusy.has(i)}
                       onClick={() => animateImage(i)}
                     >
-                      {brollBusy.has(i) ? 'Animation…' : 'Animer (0,11 $)'}
+                      {brollBusy.has(i)
+                        ? 'Animation…'
+                        : `Animer (${TIER_INFO[tier].brollPerClip.toFixed(2).replace('.', ',')} $)`}
                     </button>
                   )}
                 </div>

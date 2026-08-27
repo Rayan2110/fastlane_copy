@@ -68,9 +68,21 @@ describe('db', () => {
     const sid = insertScript(pid, sampleScript);
     const j1 = createJob(sid);
     const j2 = createJob(sid);
-    expect(claimNextPendingJob()).toEqual({id: j1, scriptId: sid, format: 'slideshow', avatarId: null});
+    expect(claimNextPendingJob()).toEqual({
+      id: j1,
+      scriptId: sid,
+      format: 'slideshow',
+      avatarId: null,
+      tier: 'eco',
+    });
     expect(getJob(j1)!.status).toBe('running');
-    expect(claimNextPendingJob()).toEqual({id: j2, scriptId: sid, format: 'slideshow', avatarId: null});
+    expect(claimNextPendingJob()).toEqual({
+      id: j2,
+      scriptId: sid,
+      format: 'slideshow',
+      avatarId: null,
+      tier: 'eco',
+    });
     expect(claimNextPendingJob()).toBeUndefined();
   });
 
