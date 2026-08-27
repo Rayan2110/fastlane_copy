@@ -8,8 +8,8 @@ const WORDS_PER_SECOND = 2.6; // debit moyen du TTS francais
 
 const TIER_INFO: Record<Tier, {label: string; avatarPerSecond: number; brollPerClip: number}> = {
   eco: {label: '🟢 Éco', avatarPerSecond: 0.0562, brollPerClip: 0.11},
-  quality: {label: '🟡 Qualité', avatarPerSecond: 0.16, brollPerClip: 0.2},
-  premium: {label: '🔴 Premium', avatarPerSecond: 0.3, brollPerClip: 2.35},
+  quality: {label: '🟡 Qualité', avatarPerSecond: 0.115, brollPerClip: 0.2},
+  premium: {label: '🔴 Premium', avatarPerSecond: 0.16, brollPerClip: 2.35},
 };
 
 function estimateAvatarCost(script: VideoScript, tier: Tier): number {

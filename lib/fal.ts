@@ -27,21 +27,16 @@ export const AVATAR_TIERS: Record<
     buildInput: (image_url, audio_url) => ({image_url, audio_url, prompt: '.'}),
   },
   quality: {
-    model: 'fal-ai/bytedance/omnihuman/v1.5',
-    pricePerSecond: 0.16,
-    label: 'Qualité — OmniHuman 1.5 (gestuelle + émotion, 1080p)',
-    buildInput: (image_url, audio_url) => ({image_url, audio_url}),
+    model: 'fal-ai/kling-video/ai-avatar/v2/pro',
+    pricePerSecond: 0.115,
+    label: 'Qualité — Kling v2 Pro (lip-sync plus fin)',
+    buildInput: (image_url, audio_url) => ({image_url, audio_url, prompt: '.'}),
   },
   premium: {
-    model: 'mirage-api/avatar-x',
-    pricePerSecond: 0.3,
-    label: 'Premium — Mirage Avatar X (décor + caméra vivants)',
-    buildInput: (reference_image_url, audio_url) => ({
-      reference_image_url,
-      audio_url,
-      prompt:
-        'casual UGC selfie video, person holding the product and talking to camera, handheld phone camera, natural indoor daylight, realistic',
-    }),
+    model: 'fal-ai/bytedance/omnihuman/v1.5',
+    pricePerSecond: 0.16,
+    label: 'Premium — OmniHuman 1.5 (gestuelle + émotion, 1080p)',
+    buildInput: (image_url, audio_url) => ({image_url, audio_url}),
   },
 };
 
@@ -140,15 +135,70 @@ function friendlyFalError(err: unknown): Error {
   return new Error(`Erreur fal.ai: ${detail || e.message || 'inconnue'}`);
 }
 
-// Appel bloquant avec polling interne (le job de rendu tourne deja en fond).
-export async function falRun<T>(model: string, input: Record<string, unknown>): Promise<T> {
-  ensureConfigured();
+// Journal des requetes payantes : si la recuperation echoue, le request_id
+// permet de retrouver le resultat sur fal.ai/dashboard/requests.
+async function logFalRequest(model: string, requestId: string): Promise<void> {
   try {
-    const result = await fal.subscribe(model, {input, logs: false});
-    return result.data as T;
-  } catch (err) {
-    throw friendlyFalError(err);
+    const line = `${new Date().toISOString()} ${model} ${requestId}\n`;
+    await fs.appendFile(path.join(process.cwd(), 'data', 'fal-requests.log'), line, 'utf8');
+  } catch {
+    // le journal ne doit jamais bloquer un rendu
   }
+}
+
+const POLL_INTERVAL_MS = 3000;
+const RUN_TIMEOUT_MS = 15 * 60_000;
+
+// Appel bloquant via l'API queue BRUTE de fal : on suit les URLs renvoyees
+// par LEUR serveur (status_url/response_url) au lieu de laisser le SDK les
+// construire — le SDK se trompe sur les fournisseurs hors namespace fal-ai/
+// (ex. mirage-api/..., cause du "Path / not found").
+export async function falRun<T>(model: string, input: Record<string, unknown>): Promise<T> {
+  if (!process.env.FAL_KEY) {
+    throw new Error('FAL_KEY manquante — ajoute ta clé fal.ai dans .env.local');
+  }
+  const headers = {Authorization: `Key ${process.env.FAL_KEY}`, 'Content-Type': 'application/json'};
+
+  const submitRes = await fetch(`https://queue.fal.run/${model}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(input),
+  });
+  const submitBody = (await submitRes.json().catch(() => ({}))) as {
+    request_id?: string;
+    status_url?: string;
+    response_url?: string;
+    detail?: unknown;
+  };
+  if (!submitRes.ok || !submitBody.status_url || !submitBody.response_url) {
+    throw friendlyFalError({status: submitRes.status, body: submitBody});
+  }
+  const {request_id: requestId, status_url: statusUrl, response_url: responseUrl} = submitBody;
+  if (requestId) await logFalRequest(model, requestId);
+
+  const deadline = Date.now() + RUN_TIMEOUT_MS;
+  for (;;) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `fal.ai: timeout après 15 min (requête ${requestId} — résultat récupérable sur fal.ai/dashboard/requests)`
+      );
+    }
+    const statusRes = await fetch(statusUrl, {headers}).catch(() => undefined);
+    const status = statusRes?.ok
+      ? ((await statusRes.json().catch(() => ({}))) as {status?: string}).status
+      : undefined;
+    // Tout etat terminal (COMPLETED, FAILED…) sort de la boucle : le verdict
+    // reel se lit sur response_url.
+    if (status && status !== 'IN_QUEUE' && status !== 'IN_PROGRESS') break;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+
+  const resultRes = await fetch(responseUrl, {headers});
+  const resultBody = (await resultRes.json().catch(() => ({}))) as T & {detail?: unknown};
+  if (!resultRes.ok) {
+    throw friendlyFalError({status: resultRes.status, body: resultBody as {detail?: unknown}});
+  }
+  return resultBody;
 }
 
 export async function downloadTo(url: string, absPath: string): Promise<void> {

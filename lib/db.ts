@@ -21,6 +21,7 @@ export type JobRow = {
   error: string | null;
   format: RenderFormat;
   avatarId: number | null;
+  tier: string;
   createdAt: string;
 };
 
@@ -286,6 +287,7 @@ type RawJob = {
   error: string | null;
   format: RenderFormat;
   avatar_id: number | null;
+  tier: string;
   created_at: string;
 };
 
@@ -301,6 +303,7 @@ export function getJob(id: number): JobRow | undefined {
     error: row.error,
     format: row.format,
     avatarId: row.avatar_id,
+    tier: row.tier,
     createdAt: row.created_at,
   };
 }
@@ -327,6 +330,7 @@ export function listJobs(productId: number): JobRow[] {
     error: r.error,
     format: r.format,
     avatarId: r.avatar_id,
+    tier: r.tier,
     createdAt: r.created_at,
   }));
 }
