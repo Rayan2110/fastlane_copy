@@ -1,6 +1,7 @@
 import React from 'react';
 import {Composition} from 'remotion';
 import {Slideshow, slideshowCalculateMetadata, type SlideshowProps} from './Slideshow';
+import {AvatarUGC, avatarCalculateMetadata, type AvatarUGCProps} from './AvatarUGC';
 
 // Props de demo pour `npm run remotion:preview` — fichiers reellement
 // presents dans public/media/preview/.
@@ -29,17 +30,34 @@ const defaultProps: SlideshowProps = {
   styleVariant: 'dark',
 };
 
+const avatarDefaultProps: AvatarUGCProps = {
+  ...defaultProps,
+  avatarVideo: 'media/preview/voice.mp3', // placeholder preview — remplace au rendu reel
+};
+
 export const Root: React.FC = () => {
   return (
-    <Composition
-      id="Slideshow"
-      component={Slideshow}
-      durationInFrames={300}
-      fps={30}
-      width={1080}
-      height={1920}
-      defaultProps={defaultProps}
-      calculateMetadata={slideshowCalculateMetadata}
-    />
+    <>
+      <Composition
+        id="Slideshow"
+        component={Slideshow}
+        durationInFrames={300}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={defaultProps}
+        calculateMetadata={slideshowCalculateMetadata}
+      />
+      <Composition
+        id="AvatarUGC"
+        component={AvatarUGC}
+        durationInFrames={300}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={avatarDefaultProps}
+        calculateMetadata={avatarCalculateMetadata}
+      />
+    </>
   );
 };

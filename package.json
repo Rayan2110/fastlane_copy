@@ -8,6 +8,7 @@
     "remotion:preview": "remotion studio video/index.ts"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "@remotion/bundler": "^4.0.257",
     "@remotion/cli": "4.0.257",
     "@remotion/google-fonts": "^4.0.257",

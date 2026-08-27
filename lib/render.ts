@@ -13,13 +13,24 @@ import {
 } from './db';
 import {synthesize} from './tts';
 import {detectBeats} from './beats';
-import type {Scene} from './types';
+import {getAvatar} from './db';
+import {ensureHoldImage} from './avatars';
+import {falUpload, falRun, downloadTo, FAL_MODELS} from './fal';
+import type {Scene, RenderFormat} from './types';
 
 const MAX_CONCURRENT = 2;
 const RENDER_TIMEOUT_MS = 20 * 60_000;
 const RENDER_CONCURRENCY = Math.max(4, Math.floor(os.cpus().length / 2));
+const MAX_AVATAR_AUDIO_S = 58; // limite Kling: 60 s
 
-type Executor = (scriptId: number, jobId: number) => Promise<void>;
+export type ClaimedJob = {
+  id: number;
+  scriptId: number;
+  format: RenderFormat;
+  avatarId: number | null;
+};
+
+type Executor = (job: ClaimedJob) => Promise<void>;
 
 // L'etat vit sur globalThis : en `next dev`, chaque recompilation recree le
 // module, mais les rendus en cours et la limite de concurrence doivent
@@ -54,9 +65,12 @@ export function ensureQueueRecovered(): void {
   pump();
 }
 
-export function enqueueRender(scriptId: number): number {
+export function enqueueRender(
+  scriptId: number,
+  opts: {format?: RenderFormat; avatarId?: number} = {}
+): number {
   ensureQueueRecovered();
-  const jobId = createJob(scriptId);
+  const jobId = createJob(scriptId, opts.format ?? 'slideshow', opts.avatarId);
   pump();
   return jobId;
 }
@@ -79,11 +93,11 @@ function pump(): void {
       break;
     }
     if (!claim) break;
-    const {id: jobId, scriptId} = claim;
+    const {id: jobId} = claim;
     s.running++;
     let job: Promise<void>;
     try {
-      job = Promise.resolve(s.executor(scriptId, jobId));
+      job = Promise.resolve(s.executor(claim));
     } catch (err) {
       // executor qui leve en synchrone : ne pas fuiter le compteur
       safeSetStatus(jobId, 'failed', (err as Error).message?.slice(0, 1000));
@@ -125,7 +139,11 @@ function killTree(pid: number | undefined): void {
   }
 }
 
-function runRemotionRender(propsPath: string, outAbs: string): Promise<void> {
+function runRemotionRender(
+  propsPath: string,
+  outAbs: string,
+  compositionId: string = 'Slideshow'
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const q = (s: string) => `"${s}"`;
     const child = spawn(
@@ -134,7 +152,7 @@ function runRemotionRender(propsPath: string, outAbs: string): Promise<void> {
         'remotion',
         'render',
         'video/index.ts',
-        'Slideshow',
+        compositionId,
         q(outAbs),
         `--props=${q(propsPath)}`,
         `--concurrency=${RENDER_CONCURRENCY}`,
@@ -172,7 +190,8 @@ function runRemotionRender(propsPath: string, outAbs: string): Promise<void> {
   });
 }
 
-async function defaultExecutor(scriptId: number, jobId: number): Promise<void> {
+async function defaultExecutor(claim: ClaimedJob): Promise<void> {
+  const {scriptId, id: jobId, format, avatarId} = claim;
   const script = getScript(scriptId);
   if (!script) throw new Error(`Script ${scriptId} introuvable`);
   const product = getProduct(script.productId);
@@ -214,7 +233,7 @@ async function defaultExecutor(scriptId: number, jobId: number): Promise<void> {
     }
   }
 
-  const props = {
+  const shared = {
     images,
     scenes,
     timings,
@@ -224,11 +243,45 @@ async function defaultExecutor(scriptId: number, jobId: number): Promise<void> {
     audioFile: `media/${script.productId}/voice-${base}.mp3`,
     musicFile,
     beatFrames,
-    styleVariant: scriptId % 2 === 0 ? 'dark' : 'light',
+    styleVariant: (scriptId % 2 === 0 ? 'dark' : 'light') as 'dark' | 'light',
   };
+
+  let compositionId = 'Slideshow';
+  let props: Record<string, unknown> = {...shared, brollClips: product.data.brollClips};
+
+  if (format === 'avatar') {
+    if (!avatarId) throw new Error('Aucun avatar choisi pour ce rendu');
+    const avatar = getAvatar(avatarId);
+    if (!avatar) throw new Error(`Avatar ${avatarId} introuvable`);
+    const audioSeconds = (timings[timings.length - 1]?.endMs ?? 0) / 1000;
+    if (audioSeconds > MAX_AVATAR_AUDIO_S) {
+      throw new Error(
+        `Voix off de ${Math.round(audioSeconds)}s — trop long pour l'avatar (max ${MAX_AVATAR_AUDIO_S}s). Raccourcis le script.`
+      );
+    }
+    // 1. Avatar tenant le produit (genere une fois par couple avatar/produit).
+    const holdRel = await ensureHoldImage(avatar, script.productId, images[0]);
+    // 2. Video parlante Kling (image + audio -> mp4 lip-synce).
+    const [imageUrl, audioUrl] = await Promise.all([
+      falUpload(path.join(process.cwd(), 'public', holdRel), 'image/png'),
+      falUpload(`${audioBase}.mp3`, 'audio/mpeg'),
+    ]);
+    const out = await falRun<{video: {url: string}}>(FAL_MODELS.talkingAvatar, {
+      image_url: imageUrl,
+      audio_url: audioUrl,
+      prompt: '.',
+    });
+    if (!out.video?.url) throw new Error('Kling n’a retourné aucune vidéo');
+    const avatarClipRel = `media/${script.productId}/avatarclip-${base}.mp4`;
+    await downloadTo(out.video.url, path.join(process.cwd(), 'public', avatarClipRel));
+
+    compositionId = 'AvatarUGC';
+    props = {...shared, avatarVideo: avatarClipRel, brollClips: product.data.brollClips};
+  }
+
   await fs.writeFile(propsPath, JSON.stringify(props), 'utf8');
 
-  await runRemotionRender(propsPath, outAbs);
+  await runRemotionRender(propsPath, outAbs, compositionId);
   insertVideo(scriptId, outRel);
 
   // Succes : l'audio est encode dans le mp4, les intermediaires degagent.

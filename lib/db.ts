@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
-import type {ProductData, VideoScript, JobStatus} from './types';
+import type {ProductData, VideoScript, JobStatus, RenderFormat, AvatarRow} from './types';
 
 export type ProductRow = {id: number; data: ProductData; createdAt: string};
 export type ScriptRow = {id: number; productId: number; data: VideoScript; createdAt: string};
@@ -19,6 +19,8 @@ export type JobRow = {
   productId: number;
   status: JobStatus;
   error: string | null;
+  format: RenderFormat;
+  avatarId: number | null;
   createdAt: string;
 };
 
@@ -48,9 +50,23 @@ CREATE TABLE IF NOT EXISTS jobs (
   script_id INTEGER NOT NULL REFERENCES scripts(id),
   status TEXT NOT NULL DEFAULT 'pending',
   error TEXT,
+  format TEXT NOT NULL DEFAULT 'slideshow',
+  avatar_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS avatars (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  image_path TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `;
+
+// Colonnes ajoutees en phase D sur des bases existantes.
+const MIGRATIONS = [
+  `ALTER TABLE jobs ADD COLUMN format TEXT NOT NULL DEFAULT 'slideshow'`,
+  `ALTER TABLE jobs ADD COLUMN avatar_id INTEGER`,
+];
 
 export function openDb(dbPath?: string): Database.Database {
   const target = dbPath ?? path.join(process.cwd(), 'data', 'fastlane.db');
@@ -61,6 +77,13 @@ export function openDb(dbPath?: string): Database.Database {
   db = new Database(target);
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+  for (const m of MIGRATIONS) {
+    try {
+      db.exec(m);
+    } catch {
+      // colonne deja presente
+    }
+  }
   return db;
 }
 
@@ -99,15 +122,21 @@ export function deleteProduct(id: number): void {
 }
 
 // Reclame atomiquement le prochain job en attente (passe en 'running').
-export function claimNextPendingJob(): {id: number; scriptId: number} | undefined {
+export function claimNextPendingJob():
+  | {id: number; scriptId: number; format: RenderFormat; avatarId: number | null}
+  | undefined {
   const row = getDb()
     .prepare(
       `UPDATE jobs SET status = 'running'
        WHERE id = (SELECT id FROM jobs WHERE status = 'pending' ORDER BY id LIMIT 1)
-       RETURNING id, script_id`
+       RETURNING id, script_id, format, avatar_id`
     )
-    .get() as {id: number; script_id: number} | undefined;
-  return row && {id: row.id, scriptId: row.script_id};
+    .get() as
+    | {id: number; script_id: number; format: RenderFormat; avatar_id: number | null}
+    | undefined;
+  return (
+    row && {id: row.id, scriptId: row.script_id, format: row.format, avatarId: row.avatar_id}
+  );
 }
 
 // Un script a-t-il deja un rendu en attente ou en cours ?
@@ -226,15 +255,29 @@ export function listVideoCounts(): Record<number, {total: number; unposted: numb
   return out;
 }
 
-export function createJob(scriptId: number): number {
-  const r = getDb().prepare('INSERT INTO jobs (script_id) VALUES (?)').run(scriptId);
+export function createJob(
+  scriptId: number,
+  format: RenderFormat = 'slideshow',
+  avatarId?: number
+): number {
+  const r = getDb()
+    .prepare('INSERT INTO jobs (script_id, format, avatar_id) VALUES (?, ?, ?)')
+    .run(scriptId, format, avatarId ?? null);
   return Number(r.lastInsertRowid);
 }
 
+type RawJob = {
+  id: number;
+  script_id: number;
+  status: JobStatus;
+  error: string | null;
+  format: RenderFormat;
+  avatar_id: number | null;
+  created_at: string;
+};
+
 export function getJob(id: number): JobRow | undefined {
-  const row = getDb().prepare('SELECT * FROM jobs WHERE id = ?').get(id) as
-    | {id: number; script_id: number; status: JobStatus; error: string | null; created_at: string}
-    | undefined;
+  const row = getDb().prepare('SELECT * FROM jobs WHERE id = ?').get(id) as RawJob | undefined;
   if (!row) return undefined;
   const script = getScript(row.script_id);
   return {
@@ -243,6 +286,8 @@ export function getJob(id: number): JobRow | undefined {
     productId: script?.productId ?? 0,
     status: row.status,
     error: row.error,
+    format: row.format,
+    avatarId: row.avatar_id,
     createdAt: row.created_at,
   };
 }
@@ -260,20 +305,45 @@ export function listJobs(productId: number): JobRow[] {
        JOIN scripts s ON s.id = j.script_id
        WHERE s.product_id = ? ORDER BY j.id DESC`
     )
-    .all(productId) as {
-    id: number;
-    script_id: number;
-    product_id: number;
-    status: JobStatus;
-    error: string | null;
-    created_at: string;
-  }[];
+    .all(productId) as (RawJob & {product_id: number})[];
   return rows.map((r) => ({
     id: r.id,
     scriptId: r.script_id,
     productId: r.product_id,
     status: r.status,
     error: r.error,
+    format: r.format,
+    avatarId: r.avatar_id,
     createdAt: r.created_at,
   }));
+}
+
+// --- Avatars (phase D) ---
+
+export function insertAvatar(name: string, imagePath: string): number {
+  const r = getDb()
+    .prepare('INSERT INTO avatars (name, image_path) VALUES (?, ?)')
+    .run(name, imagePath);
+  return Number(r.lastInsertRowid);
+}
+
+export function getAvatar(id: number): AvatarRow | undefined {
+  const row = getDb().prepare('SELECT * FROM avatars WHERE id = ?').get(id) as
+    | {id: number; name: string; image_path: string; created_at: string}
+    | undefined;
+  return row && {id: row.id, name: row.name, imagePath: row.image_path, createdAt: row.created_at};
+}
+
+export function listAvatars(): AvatarRow[] {
+  const rows = getDb().prepare('SELECT * FROM avatars ORDER BY id DESC').all() as {
+    id: number;
+    name: string;
+    image_path: string;
+    created_at: string;
+  }[];
+  return rows.map((r) => ({id: r.id, name: r.name, imagePath: r.image_path, createdAt: r.created_at}));
+}
+
+export function deleteAvatar(id: number): void {
+  getDb().prepare('DELETE FROM avatars WHERE id = ?').run(id);
 }
