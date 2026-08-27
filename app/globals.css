@@ -286,6 +286,28 @@ button.small {
   letter-spacing: 0.5px;
 }
 
+.image-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.image-cell {
+  flex: 0 0 130px;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.image-cell img {
+  width: 130px;
+  height: 130px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
 .button-link {
   display: inline-block;
   background: var(--accent);

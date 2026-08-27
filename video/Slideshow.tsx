@@ -3,6 +3,8 @@ import {
   AbsoluteFill,
   Audio,
   Img,
+  Loop,
+  OffthreadVideo,
   interpolate,
   Sequence,
   spring,
@@ -35,6 +37,7 @@ export type SlideshowProps = {
   audioFile: string; // relatif a public/
   musicFile?: string;
   beatFrames?: number[]; // coupes calees sur la musique
+  brollClips?: Record<number, string>; // imageIndex -> clip anime
   styleVariant: StyleVariant;
 };
 
@@ -47,7 +50,8 @@ const ShotImage: React.FC<{
   seed: number;
   bg: string;
   gradient: string;
-}> = ({src, duration, zoomIn, seed, bg, gradient}) => {
+  videoSrc?: string; // clip B-roll anime : remplace l'image fixe
+}> = ({src, duration, zoomIn, seed, bg, gradient, videoSrc}) => {
   const frame = useCurrentFrame();
   const [zFrom, zTo] = zoomIn ? [1, 1 + STYLE.zoomStrength] : [1 + STYLE.zoomStrength, 1];
   const zoom = interpolate(frame, [0, duration], [zFrom, zTo], {
@@ -55,18 +59,23 @@ const ShotImage: React.FC<{
     easing: Easing.out(Easing.cubic),
   });
   const shake = useCameraShake(seed);
+  const mediaStyle = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover' as const,
+    filter: STYLE.grade,
+  };
   return (
     <AbsoluteFill style={{backgroundColor: bg}}>
-      <Img
-        src={staticFile(src)}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          transform: `scale(${zoom})${shake}`,
-          filter: STYLE.grade,
-        }}
-      />
+      {videoSrc ? (
+        // Le clip a son propre mouvement : pas de Ken Burns par-dessus.
+        // Boucle sur 5 s (duree des clips Seedance) si le plan est plus long.
+        <Loop durationInFrames={150}>
+          <OffthreadVideo src={staticFile(videoSrc)} muted style={mediaStyle} />
+        </Loop>
+      ) : (
+        <Img src={staticFile(src)} style={{...mediaStyle, transform: `scale(${zoom})${shake}`}} />
+      )}
       <AbsoluteFill style={{background: gradient}} />
     </AbsoluteFill>
   );
@@ -74,7 +83,15 @@ const ShotImage: React.FC<{
 
 // ---------- Captions karaoke ----------
 
-const Karaoke: React.FC<{timings: WordTiming[]; emphasis: Set<string>; textColor: string}> = ({
+export const buildEmphasisSet = (scenes: Scene[]): Set<string> => {
+  const set = new Set<string>();
+  for (const s of scenes) {
+    for (const w of s.emphasisWords ?? []) set.add(cleanWord(w));
+  }
+  return set;
+};
+
+export const Karaoke: React.FC<{timings: WordTiming[]; emphasis: Set<string>; textColor: string}> = ({
   timings,
   emphasis,
   textColor,
@@ -195,7 +212,7 @@ function parsePrice(p: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-const PriceBlock: React.FC<{price: string; compareAtPrice?: string; cta?: string}> = ({
+export const PriceBlock: React.FC<{price: string; compareAtPrice?: string; cta?: string}> = ({
   price,
   compareAtPrice,
 }) => {
@@ -296,7 +313,7 @@ const PriceBlock: React.FC<{price: string; compareAtPrice?: string; cta?: string
   );
 };
 
-const UrgencyBanner: React.FC = () => {
+export const UrgencyBanner: React.FC = () => {
   const frame = useCurrentFrame();
   if (!STYLE.urgencyBanner) return null;
   const pulse = 0.85 + 0.15 * Math.abs(Math.sin(frame * STYLE.ctaPulseSpeed));
@@ -322,6 +339,26 @@ const UrgencyBanner: React.FC = () => {
   );
 };
 
+export const Watermark: React.FC<{brand: string; color: string}> = ({brand, color}) => (
+  <AbsoluteFill
+    style={{justifyContent: 'flex-start', alignItems: 'center', paddingTop: STYLE.watermarkTop}}
+  >
+    <div
+      style={{
+        fontFamily: FONT,
+        fontWeight: 900,
+        fontSize: 36,
+        color,
+        letterSpacing: '10px',
+        textTransform: 'uppercase',
+        textShadow: '0 4px 20px rgba(0,0,0,0.6)',
+      }}
+    >
+      {brand}
+    </div>
+  </AbsoluteFill>
+);
+
 // ---------- Metadata ----------
 
 export const slideshowCalculateMetadata = ({props}: {props: SlideshowProps}) => {
@@ -341,6 +378,7 @@ export const Slideshow: React.FC<SlideshowProps> = ({
   audioFile,
   musicFile,
   beatFrames,
+  brollClips,
   styleVariant,
 }) => {
   const {fps, durationInFrames} = useVideoConfig();
@@ -355,13 +393,7 @@ export const Slideshow: React.FC<SlideshowProps> = ({
       }),
     [scenes, sceneFrames, images.length, beatFrames]
   );
-  const emphasis = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of scenes) {
-      for (const w of s.emphasisWords ?? []) set.add(cleanWord(w));
-    }
-    return set;
-  }, [scenes]);
+  const emphasis = useMemo(() => buildEmphasisSet(scenes), [scenes]);
 
   const punch = useHookPunch();
   const frame = useCurrentFrame();
@@ -405,6 +437,7 @@ export const Slideshow: React.FC<SlideshowProps> = ({
                 seed={i}
                 bg={theme.bg}
                 gradient={theme.gradient}
+                videoSrc={brollClips?.[shot.imageIndex]}
               />
             </Sequence>
           );
@@ -441,24 +474,7 @@ export const Slideshow: React.FC<SlideshowProps> = ({
       <Karaoke timings={timings} emphasis={emphasis} textColor={STYLE.captionColor} />
 
       <Vignette />
-
-      <AbsoluteFill
-        style={{justifyContent: 'flex-start', alignItems: 'center', paddingTop: STYLE.watermarkTop}}
-      >
-        <div
-          style={{
-            fontFamily: FONT,
-            fontWeight: 900,
-            fontSize: 36,
-            color: theme.watermark,
-            letterSpacing: '10px',
-            textTransform: 'uppercase',
-            textShadow: '0 4px 20px rgba(0,0,0,0.6)',
-          }}
-        >
-          {brand}
-        </div>
-      </AbsoluteFill>
+      <Watermark brand={brand} color={theme.watermark} />
 
       {/* Fondu de fin discret */}
       <AbsoluteFill style={{backgroundColor: '#000', opacity: endFade, pointerEvents: 'none'}} />

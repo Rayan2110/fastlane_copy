@@ -1,7 +1,18 @@
 'use client';
 
 import {useCallback, useEffect, useState} from 'react';
-import type {ProductData, VideoScript, JobStatus, Scene} from '@/lib/types';
+import type {ProductData, VideoScript, JobStatus, Scene, AvatarRow, RenderFormat} from '@/lib/types';
+
+const AVATAR_PRICE_PER_SECOND = 0.0562;
+const WORDS_PER_SECOND = 2.6; // debit moyen du TTS francais
+
+function estimateAvatarCost(script: VideoScript): number {
+  const words = [...script.scenes.map((s) => s.voiceText), script.cta]
+    .join(' ')
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return (words / WORDS_PER_SECOND) * AVATAR_PRICE_PER_SECOND;
+}
 
 type ProductRow = {id: number; data: ProductData; createdAt: string};
 type ScriptRow = {id: number; productId: number; data: VideoScript};
@@ -175,6 +186,10 @@ export function ProductView({productId}: {productId: number}) {
   const [warning, setWarning] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [retryingIds, setRetryingIds] = useState<Set<number>>(new Set());
+  const [format, setFormat] = useState<RenderFormat>('slideshow');
+  const [avatars, setAvatars] = useState<AvatarRow[]>([]);
+  const [avatarId, setAvatarId] = useState<number | ''>('');
+  const [brollBusy, setBrollBusy] = useState<Set<number>>(new Set());
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/products/${productId}`);
@@ -183,6 +198,10 @@ export function ProductView({productId}: {productId: number}) {
 
   useEffect(() => {
     refresh();
+    fetch('/api/avatars')
+      .then((r) => r.json())
+      .then((j) => setAvatars(j.avatars ?? []))
+      .catch(() => {});
   }, [refresh]);
 
   const hasActiveJobs = data?.jobs.some((j) => j.status === 'pending' || j.status === 'running');
@@ -216,13 +235,17 @@ export function ProductView({productId}: {productId: number}) {
 
   const renderSelection = async () => {
     if (selected.size === 0) return;
+    if (format === 'avatar' && !avatarId) {
+      setError('Choisis un avatar (ou crée-en un sur la page Avatars)');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const res = await fetch('/api/scripts/render', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({scriptIds: [...selected]}),
+        body: JSON.stringify({scriptIds: [...selected], format, avatarId: avatarId || undefined}),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erreur inconnue');
@@ -264,6 +287,30 @@ export function ProductView({productId}: {productId: number}) {
     await refresh();
   };
 
+  const animateImage = async (imageIndex: number) => {
+    if (brollBusy.has(imageIndex)) return;
+    setBrollBusy((prev) => new Set(prev).add(imageIndex));
+    setError(null);
+    try {
+      const res = await fetch(`/api/products/${productId}/broll`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({imageIndex}),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Erreur inconnue');
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBrollBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(imageIndex);
+        return next;
+      });
+    }
+  };
+
   if (!data) return <p className="sub">Chargement…</p>;
 
   const {product, scripts, videos, jobs} = data;
@@ -303,7 +350,7 @@ export function ProductView({productId}: {productId: number}) {
       </p>
 
       <div className="card">
-        <div className="row">
+        <div className="row" style={{flexWrap: 'wrap'}}>
           <select value={count} onChange={(e) => setCount(Number(e.target.value))}>
             <option value={5}>5 scripts</option>
             <option value={10}>10 scripts</option>
@@ -312,6 +359,28 @@ export function ProductView({productId}: {productId: number}) {
           <button onClick={generate} disabled={busy}>
             {busy ? 'Claude écrit…' : '1 · Générer les scripts'}
           </button>
+          <select
+            style={{flex: 'none', minWidth: 190}}
+            value={format}
+            onChange={(e) => setFormat(e.target.value as RenderFormat)}
+          >
+            <option value="slideshow">🎞 Slideshow (gratuit)</option>
+            <option value="avatar">🧑 Avatar UGC (payant)</option>
+          </select>
+          {format === 'avatar' ? (
+            <select
+              style={{flex: 'none', minWidth: 160}}
+              value={avatarId}
+              onChange={(e) => setAvatarId(e.target.value ? Number(e.target.value) : '')}
+            >
+              <option value="">— avatar —</option>
+              {avatars.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <button
             onClick={renderSelection}
             disabled={busy || selected.size === 0}
@@ -321,11 +390,68 @@ export function ProductView({productId}: {productId: number}) {
           </button>
         </div>
         <p className="hint">
-          Génère → relis/édite/écrème → coche les bons → rends. Chaque rendu prend ~2-3 min.
+          Génère → relis/édite/écrème → coche les bons → rends. Slideshow : gratuit, ~2-3 min.
+          {format === 'avatar' && data ? (
+            <>
+              {' '}
+              Avatar : crédits fal.ai —{' '}
+              <b style={{color: 'var(--accent)'}}>
+                ~
+                {[...selected]
+                  .reduce((sum, id) => {
+                    const s = scripts.find((x) => x.id === id);
+                    return sum + (s ? estimateAvatarCost(s.data) : 0);
+                  }, 0)
+                  .toFixed(2)}{' '}
+                $ pour la sélection
+              </b>{' '}
+              (+0,04 $ la première fois par produit), ~5-10 min par vidéo.
+            </>
+          ) : null}
+          {avatars.length === 0 && format === 'avatar' ? (
+            <>
+              {' '}
+              <a href="/avatars" style={{color: 'var(--accent)'}}>
+                Crée d’abord un avatar →
+              </a>
+            </>
+          ) : null}
         </p>
         {error ? <div className="error-box">{error}</div> : null}
         {warning ? <div className="error-box" style={{background: '#4a3b12', color: 'var(--accent)'}}>{warning}</div> : null}
       </div>
+
+      {(product.data.localImages?.length ?? 0) > 0 ? (
+        <section>
+          <h2>Images du produit</h2>
+          <p className="hint" style={{marginTop: 0}}>
+            🎬 « Animer » transforme une photo en clip vidéo de 5 s (~0,11 $ de crédits fal.ai).
+            Les clips remplacent automatiquement l’image fixe dans toutes les prochaines vidéos.
+          </p>
+          <div className="image-strip">
+            {product.data.localImages!.map((img, i) => {
+              const animated = Boolean(product.data.brollClips?.[i]);
+              return (
+                <div key={i} className="image-cell">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/${img}`} alt={`image ${i}`} />
+                  {animated ? (
+                    <span className="badge done">🎬 animée</span>
+                  ) : (
+                    <button
+                      className="ghost small"
+                      disabled={brollBusy.has(i)}
+                      onClick={() => animateImage(i)}
+                    >
+                      {brollBusy.has(i) ? 'Animation…' : 'Animer (0,11 $)'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {scripts.length > 0 ? (
         <section>
